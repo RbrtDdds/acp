@@ -1,0 +1,27 @@
+{
+  "name": "@acp/cli",
+  "version": "0.1.0",
+  "description": "AI Context Protocol — CLI tool",
+  "type": "module",
+  "bin": {
+    "acp": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --banner.js '#!/usr/bin/env node'",
+    "dev": "tsup src/index.ts --format esm --dts --watch",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@acp/core": "workspace:*",
+    "commander": "^13.1.0",
+    "chalk": "^5.4.0",
+    "ora": "^8.2.0",
+    "inquirer": "^12.4.0"
+  },
+  "devDependencies": {
+    "tsup": "^8.4.0",
+    "typescript": "^5.7.0",
+    "@types/inquirer": "^9.0.0"
+  },
+  "license": "MIT"
+}

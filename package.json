@@ -1,0 +1,14 @@
+{
+  "name": "acp-monorepo",
+  "private": true,
+  "description": "AI Context Protocol — persistent memory layer for AI tools",
+  "scripts": {
+    "build": "pnpm -r build",
+    "dev": "pnpm -r --parallel dev",
+    "test": "pnpm -r test",
+    "clean": "pnpm -r clean"
+  },
+  "keywords": ["ai", "context", "memory", "cli", "claude", "llm"],
+  "author": "Robert Dudas",
+  "license": "MIT"
+}
