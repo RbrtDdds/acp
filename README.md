@@ -77,7 +77,7 @@ Just use `claude` as normal. Claude now has these tools available:
 | Tool | Description |
 |------|-------------|
 | `acp_context` | Get proactive context for current project (use at session start) |
-| `acp_recall` | Search memory by query — finds relevant facts from past sessions |
+| `acp_recall` | Search memory by query — scoped to current project by default, pass `scope: "all"` for cross-project |
 | `acp_remember` | Save a new fact, decision, or learning to persistent memory |
 | `acp_status` | Show memory stats — facts, sessions, storage size |
 | `acp_facts` | List all stored facts for current project |
@@ -120,8 +120,9 @@ acp init                              # Initialize ACP
 acp import claude-code                # Import Claude Code sessions
 acp status                            # Memory stats
 acp status -p my-project              # Stats for specific project
-acp recall "auth middleware"           # Search context
-acp recall "query" -p my-project      # Search within a project
+acp recall "auth middleware"           # Search context (current project from CWD)
+acp recall "query" -p my-project      # Search within a named project
+acp recall "query" --all              # Search across ALL projects
 acp facts my-project                  # List extracted facts
 acp facts my-project -t decision      # Filter by type
 acp facts add my-project decision "We use JWT for auth"
@@ -133,6 +134,12 @@ acp setup global                      # Inject ACP instructions into ~/.claude/C
 acp setup project                     # Inject into local CLAUDE.md only
 acp claude                            # Wrap claude CLI with ACP memory (legacy)
 ```
+
+### Project Scoping
+
+By default, all recall and search operations are scoped to the **current project only** — determined from CWD in CLI, or from `process.cwd()` in the MCP server. This means ACP won't leak context from other repos into your current session.
+
+To search across all projects, use `--all` in CLI or `scope: "all"` in MCP. This is useful when you want to reference decisions or patterns from a different repo.
 
 ## Storage Options
 
@@ -203,6 +210,7 @@ ACP automatically deduplicates facts across sessions using a two-pass approach: 
 | `@acp/core` | Core library — models, adapters, engines |
 | `@acp/cli` | CLI tool — `acp init`, `acp recall`, etc. |
 | `@acp/mcp` | MCP server — native Claude Code integration |
+| `@acp/embeddings` | Optional local embedding provider (transformers.js) |
 
 ## Contributing
 
