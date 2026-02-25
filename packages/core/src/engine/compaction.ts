@@ -1,14 +1,14 @@
 import type { StorageAdapter } from '../adapters/storage.interface.js';
 import type { Session, MemoryTier } from '../models/schemas.js';
 
-interface CompactionConfig {
+export interface CompactionConfig {
   hotTTL: number;    // ms
   warmTTL: number;   // ms
   coldTTL: number;   // ms
   maxTotalSize: number; // bytes
 }
 
-interface CompactionResult {
+export interface CompactionResult {
   demoted: { sessionId: string; from: MemoryTier; to: MemoryTier }[];
   deleted: string[];
   factsRemoved: number;

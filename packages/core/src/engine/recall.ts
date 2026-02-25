@@ -129,12 +129,13 @@ export class RecallEngine {
 
   private keywordSearch(query: string, facts: SemanticFact[]): ScoredFact[] {
     const queryWords = this.tokenize(query);
+    const queryArr = [...queryWords];
 
     return facts
       .map((fact) => {
         const factWords = this.tokenize(fact.content);
-        const intersection = queryWords.filter((w) => factWords.has(w));
-        const score = intersection.length / Math.max(queryWords.length, 1);
+        const intersection = queryArr.filter((w) => factWords.has(w));
+        const score = intersection.length / Math.max(queryArr.length, 1);
 
         return {
           fact,

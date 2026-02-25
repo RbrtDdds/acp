@@ -150,7 +150,17 @@ export class ACP {
     await this.storage.saveMessages(session.id, messages);
 
     // Extract facts
-    const facts = this.extractor.extractFromMessages(messages, projectId, session.id);
+    const extractedFacts = this.extractor.extractFromMessages(messages, projectId, session.id);
+
+    // Cross-session deduplication: skip facts that already exist
+    const existingFacts = await this.storage.listFacts({ projectId });
+    const facts = extractedFacts.filter((newFact) => {
+      return !existingFacts.some(
+        (existing) =>
+          existing.type === newFact.type &&
+          this.contentSimilarity(existing.content, newFact.content) > 0.8
+      );
+    });
 
     // Save facts and compute embeddings
     for (const fact of facts) {
@@ -379,6 +389,17 @@ export class ACP {
   }
 
   // === Internal ===
+
+  /**
+   * Simple Jaccard similarity between two strings.
+   */
+  private contentSimilarity(a: string, b: string): number {
+    const wordsA = new Set(a.toLowerCase().split(/\s+/));
+    const wordsB = new Set(b.toLowerCase().split(/\s+/));
+    const intersection = [...wordsA].filter((w) => wordsB.has(w));
+    const union = new Set([...wordsA, ...wordsB]);
+    return intersection.length / union.size;
+  }
 
   private createAdapter(): StorageAdapter {
     switch (this.config.storage) {

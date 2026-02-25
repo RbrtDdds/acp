@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
+import type { Project } from '@acp/core';
 import { createACP } from '../utils/acp-instance.js';
 
 export const compactCommand = new Command('compact')
@@ -14,7 +15,7 @@ export const compactCommand = new Command('compact')
 
       if (options.project) {
         const projects = await acp.listProjects();
-        const project = projects.find((p) => p.name === options.project);
+        const project = projects.find((p: Project) => p.name === options.project);
         if (!project) {
           console.log(chalk.red(`\nProject "${options.project}" not found.\n`));
           return;

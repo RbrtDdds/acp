@@ -13,6 +13,33 @@ interface ExtractionRule {
 }
 
 /**
+ * Patterns that indicate a match is noise, not a real fact.
+ * File paths, tool outputs, UUIDs, JSON fragments, etc.
+ */
+const NOISE_PATTERNS = [
+  /^[\/~][\w\/\.\-]+$/,                    // File paths: /Users/foo/bar, ~/Projects/...
+  /^[a-f0-9\-]{20,}$/i,                    // UUIDs, hashes
+  /^\{.*\}$/s,                              // JSON objects
+  /^\[.*\]$/s,                              // JSON arrays
+  /^https?:\/\//,                           // URLs
+  /^\s*\d+\s*$/,                            // Pure numbers
+  /^(true|false|null|undefined|NaN)$/i,     // Primitives
+  /\[tool:\s/,                              // Tool use markers
+  /\[result:\s/,                            // Tool result markers
+  /^(src|lib|dist|node_modules|\.)/,        // Common dir prefixes in tool output
+  /^\w+\.(ts|js|tsx|jsx|json|md|css|html|py|rs|go)$/,  // Bare filenames
+  /error\s+(TS|at\s+)/i,                    // TypeScript/stack trace errors
+  /^\s*(import|export|const|let|var|function|class|interface|type)\s/,  // Code lines
+];
+
+/**
+ * Check if extracted content is noise (not a real fact).
+ */
+function isNoise(content: string): boolean {
+  return NOISE_PATTERNS.some((p) => p.test(content.trim()));
+}
+
+/**
  * Heuristic fact extractor — extracts structured facts from conversations
  * using pattern matching. No LLM required, works fully offline.
  *
@@ -37,11 +64,15 @@ export class FactExtractor {
 
     for (let i = 0; i < messages.length; i++) {
       const msg = messages[i];
-      // Extract from both user and assistant messages
-      if (msg.role === 'user' || msg.role === 'assistant') {
-        const facts = this.extractFromText(msg.content, projectId, sessionId, i);
-        allFacts.push(...facts);
-      }
+
+      // Only extract from user and assistant messages
+      if (msg.role !== 'user' && msg.role !== 'assistant') continue;
+
+      // Skip tool-heavy messages (usually noise)
+      if (this.isToolOutput(msg.content)) continue;
+
+      const facts = this.extractFromText(msg.content, projectId, sessionId, i);
+      allFacts.push(...facts);
     }
 
     // Deduplicate similar facts
@@ -76,7 +107,10 @@ export class FactExtractor {
           }
 
           // Skip very short or very long extractions
-          if (content.length < 3 || content.length > 200) continue;
+          if (content.length < 5 || content.length > 200) continue;
+
+          // Skip noise: file paths, UUIDs, JSON, tool output, code
+          if (isNoise(content)) continue;
 
           // Boost confidence if mentioned by both user and assistant
           const confidence = rule.confidenceBase;
@@ -113,6 +147,16 @@ export class FactExtractor {
    */
   addRule(rule: ExtractionRule): void {
     this.rules.push(rule);
+  }
+
+  /**
+   * Check if a message is mostly tool output (not human-readable conversation).
+   */
+  private isToolOutput(content: string): boolean {
+    const toolMarkers = ['[tool:', '[result:', '```bash', '$ ', 'Exit code'];
+    const toolCount = toolMarkers.filter((m) => content.includes(m)).length;
+    // If more than half the content is tool markers, skip it
+    return toolCount >= 2;
   }
 
   /**
@@ -230,9 +274,10 @@ export class FactExtractor {
       {
         type: 'task',
         patterns: [
-          /(?:(?:need|want)\s+to|TODO|FIXME|HACK)\s+(.{5,100})/gi,
-          /(?:next\s+(?:step|task)|should\s+(?:also|then))\s+(.{5,100})/gi,
-          /(?:implement|add|create|build|refactor|fix|update|migrate)\s+(.{5,80})/gi,
+          // Only match explicit task markers, not generic verbs
+          /(?:TODO|FIXME|HACK|XXX)\s*[:\s]+(.{5,100})/gi,
+          /(?:next\s+(?:step|task)\s+(?:is|:))\s+(.{5,100})/gi,
+          /(?:(?:need|want)\s+to)\s+([a-z][\w\s]{5,80}(?:the|a|this|our)\s[\w\s]+)/gi,
         ],
         confidenceBase: 0.60,
       },

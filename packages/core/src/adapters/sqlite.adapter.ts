@@ -209,7 +209,7 @@ export class SQLiteAdapter implements StorageAdapter {
     const db = this.getDb();
     const results = db.exec('SELECT * FROM projects ORDER BY lastAccessed DESC');
     if (!results.length) return [];
-    return results[0].values.map((row) => this.rowToProject(this.arrayToObject(results[0].columns, row)));
+    return results[0].values.map((row: unknown[]) => this.rowToProject(this.arrayToObject(results[0].columns, row)));
   }
 
   async updateProject(project: Partial<Project> & { id: string }): Promise<void> {

@@ -19,6 +19,13 @@ export interface ClaudeSession {
 
 /**
  * Reads and parses Claude Code session files from ~/.claude/projects/
+ *
+ * Claude Code stores sessions as JSONL files directly in the project directory:
+ *   ~/.claude/projects/<encoded-path>/<uuid>.jsonl
+ *   ~/.claude/projects/<encoded-path>/<uuid>/  (companion directory)
+ *
+ * The encoded path uses dashes instead of slashes:
+ *   -Users-robertdudas-Projects-Private-matchhub → /Users/robertdudas/Projects/Private/matchhub
  */
 export class ClaudeCodeReader {
   private claudeDir: string;
@@ -39,10 +46,12 @@ export class ClaudeCodeReader {
     for (const entry of readdirSync(projectsDir, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
 
-      const sessionsDir = join(projectsDir, entry.name, 'sessions');
-      if (!existsSync(sessionsDir)) continue;
+      const projectDir = join(projectsDir, entry.name);
 
-      const sessionFiles = readdirSync(sessionsDir).filter((f) => f.endsWith('.jsonl'));
+      // JSONL files are directly in the project directory
+      const sessionFiles = readdirSync(projectDir).filter((f: string) => f.endsWith('.jsonl'));
+
+      if (sessionFiles.length === 0) continue;
 
       projects.push({
         encodedPath: entry.name,
@@ -58,12 +67,12 @@ export class ClaudeCodeReader {
    * List session IDs for a project.
    */
   listSessions(encodedProjectPath: string): string[] {
-    const sessionsDir = join(this.claudeDir, 'projects', encodedProjectPath, 'sessions');
-    if (!existsSync(sessionsDir)) return [];
+    const projectDir = join(this.claudeDir, 'projects', encodedProjectPath);
+    if (!existsSync(projectDir)) return [];
 
-    return readdirSync(sessionsDir)
-      .filter((f) => f.endsWith('.jsonl'))
-      .map((f) => basename(f, '.jsonl'));
+    return readdirSync(projectDir)
+      .filter((f: string) => f.endsWith('.jsonl'))
+      .map((f: string) => basename(f, '.jsonl'));
   }
 
   /**
@@ -71,13 +80,13 @@ export class ClaudeCodeReader {
    */
   readSession(encodedProjectPath: string, sessionId: string): ClaudeSession | null {
     const filePath = join(
-      this.claudeDir, 'projects', encodedProjectPath, 'sessions', `${sessionId}.jsonl`
+      this.claudeDir, 'projects', encodedProjectPath, `${sessionId}.jsonl`
     );
 
     if (!existsSync(filePath)) return null;
 
     const content = readFileSync(filePath, 'utf-8');
-    const lines = content.split('\n').filter((line) => line.trim());
+    const lines = content.split('\n').filter((line: string) => line.trim());
 
     const messages: Message[] = [];
     let startedAt = Date.now();
@@ -210,7 +219,7 @@ export class ClaudeCodeReader {
 
   /**
    * Decode Claude Code's URL-encoded project path.
-   * e.g., "-Users-robert-projects-my-app" → "/Users/robert/projects/my-app"
+   * e.g., "-Users-robertdudas-Projects-Private-matchhub" → "/Users/robertdudas/Projects/Private/matchhub"
    */
   private decodePath(encoded: string): string {
     return encoded.replace(/-/g, '/');

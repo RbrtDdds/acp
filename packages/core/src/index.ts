@@ -33,5 +33,6 @@ export { FactExtractor } from './engine/fact-extractor.js';
 export { RecallEngine } from './engine/recall.js';
 export type { EmbeddingProvider, RecallOptions, RecallResult, ScoredFact } from './engine/recall.js';
 export { CompactionEngine } from './engine/compaction.js';
+export type { CompactionResult, CompactionConfig } from './engine/compaction.js';
 export { ClaudeCodeReader } from './engine/claude-reader.js';
 export type { ClaudeSession } from './engine/claude-reader.js';

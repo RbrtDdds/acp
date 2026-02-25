@@ -7,6 +7,8 @@ import { recallCommand } from './commands/recall.js';
 import { importCommand } from './commands/import.js';
 import { exportCommand } from './commands/export.js';
 import { compactCommand } from './commands/compact.js';
+import { claudeCommand } from './commands/claude.js';
+import { setupCommand } from './commands/setup.js';
 
 const program = new Command();
 
@@ -23,5 +25,7 @@ program.addCommand(recallCommand);
 program.addCommand(importCommand);
 program.addCommand(exportCommand);
 program.addCommand(compactCommand);
+program.addCommand(claudeCommand);
+program.addCommand(setupCommand);
 
 program.parse();

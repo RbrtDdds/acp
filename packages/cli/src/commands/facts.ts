@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
+import type { Project } from '@acp/core';
 import { createACP } from '../utils/acp-instance.js';
 
 export const factsCommand = new Command('facts')
@@ -12,7 +13,7 @@ export const factsCommand = new Command('facts')
 
     try {
       const projects = await acp.listProjects();
-      const project = projects.find((p) => p.name === projectName);
+      const project = projects.find((p: Project) => p.name === projectName);
 
       if (!project) {
         console.log(chalk.red(`\nProject "${projectName}" not found.\n`));
@@ -74,7 +75,7 @@ factsCommand
 
     try {
       const projects = await acp.listProjects();
-      const project = projects.find((p) => p.name === projectName);
+      const project = projects.find((p: Project) => p.name === projectName);
       if (!project) {
         console.log(chalk.red(`\nProject "${projectName}" not found.\n`));
         return;
