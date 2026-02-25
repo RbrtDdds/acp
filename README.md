@@ -29,7 +29,7 @@ Claude can:
 ### 1. Install
 
 ```bash
-git clone https://github.com/ACP-Project/acp.git
+git clone https://github.com/robodudas/acp.git
 cd acp
 pnpm install
 pnpm -r build
@@ -39,6 +39,7 @@ pnpm -r build
 
 ```bash
 # Link CLI globally
+pnpm setup              # (if not yet configured)
 cd packages/cli && pnpm link --global && cd ../..
 
 # Initialize (choose storage: local/cloud/self-hosted)
@@ -56,12 +57,20 @@ This reads all your sessions from `~/.claude/projects/`, extracts facts (decisio
 ### 4. Connect to Claude Code (MCP server)
 
 ```bash
-claude mcp add --transport stdio --scope user acp -- node /path/to/acp/packages/mcp/dist/index.js
+claude mcp add --transport stdio --scope user acp -- node $(pwd)/packages/mcp/dist/index.js
 ```
 
-That's it. Now every `claude` session has access to your project memory.
+### 5. Tell Claude to use ACP automatically
 
-### 5. Use it
+```bash
+acp setup global
+```
+
+This adds instructions to `~/.claude/CLAUDE.md` so Claude calls `acp_context` at the start of every session and uses `acp_recall` / `acp_remember` throughout.
+
+That's it. Now every `claude` session has persistent memory.
+
+### 6. Use it
 
 Just use `claude` as normal. Claude now has these tools available:
 
@@ -74,38 +83,55 @@ Just use `claude` as normal. Claude now has these tools available:
 | `acp_facts` | List all stored facts for current project |
 | `acp_import` | Import Claude Code sessions into ACP memory |
 
-### Example session
+### Example: Claude with ACP memory
 
 ```
+$ claude
+
 You: What did we decide about the auth middleware?
 
-Claude: [calls acp_recall with query "auth middleware"]
-Based on your project memory, you decided to use Supabase for auth
-instead of Firebase (2 weeks ago), and the middleware is in
-lib/gateway/middleware/auth.ts.
+Claude: [calls acp_recall("auth middleware")]
+  Based on your project memory, you decided to use Supabase for auth
+  instead of Firebase (2 weeks ago), and the middleware is in
+  lib/gateway/middleware/auth.ts.
 
 You: Let's switch to JWT tokens instead.
 
-Claude: [calls acp_remember with type "decision"]
-Done. I've saved this decision to ACP memory. I'll remember this
-in future sessions.
+Claude: [calls acp_remember(type="decision", content="Switched from Supabase
+  auth to JWT tokens for authentication middleware")]
+  Done. I've saved this decision to ACP memory so I'll remember it
+  in future sessions.
 ```
+
+### Example: Claude wrapper (legacy)
+
+For environments where MCP isn't available, ACP also ships a `claude` wrapper:
+
+```bash
+acp claude
+```
+
+This wraps the `claude` CLI with context injection (via CLAUDE.md backup/restore) and auto-imports new sessions after each run. The MCP approach above is preferred.
 
 ## CLI Commands
 
-ACP also comes with a standalone CLI for managing memory:
-
 ```bash
-acp init                          # Initialize ACP
-acp import claude-code            # Import Claude Code sessions
-acp status                        # Memory stats
-acp recall "query"                # Search context
-acp facts                         # List extracted facts
-acp facts add "We use pnpm"       # Manually add a fact
-acp facts pin <id>                # Pin a fact (never compacted)
-acp export --format claude-md     # Export as CLAUDE.md
-acp compact                       # Run memory compaction
-acp claude                        # Wrap claude CLI (legacy, prefer MCP)
+acp init                              # Initialize ACP
+acp import claude-code                # Import Claude Code sessions
+acp status                            # Memory stats
+acp status -p my-project              # Stats for specific project
+acp recall "auth middleware"           # Search context
+acp recall "query" -p my-project      # Search within a project
+acp facts my-project                  # List extracted facts
+acp facts my-project -t decision      # Filter by type
+acp facts add my-project decision "We use JWT for auth"
+acp facts pin <id>                    # Pin a fact (never compacted)
+acp export my-project                 # Export as CLAUDE.md
+acp export my-project -f json         # Export as JSON
+acp compact                           # Run memory compaction
+acp setup global                      # Inject ACP instructions into ~/.claude/CLAUDE.md
+acp setup project                     # Inject into local CLAUDE.md only
+acp claude                            # Wrap claude CLI with ACP memory (legacy)
 ```
 
 ## Storage Options
@@ -149,7 +175,7 @@ cold (30-90d) → high-confidence facts only (> 0.8)
 
 ### Cross-Session Deduplication
 
-ACP automatically deduplicates facts across sessions using Jaccard similarity — importing the same session twice won't create duplicate facts.
+ACP automatically deduplicates facts across sessions using a two-pass approach: MD5 content hashing for O(1) exact matches, then Jaccard similarity for fuzzy near-duplicates. Importing the same session twice won't create duplicate facts.
 
 ## Architecture
 
@@ -178,6 +204,26 @@ ACP automatically deduplicates facts across sessions using Jaccard similarity �
 | `@acp/cli` | CLI tool — `acp init`, `acp recall`, etc. |
 | `@acp/mcp` | MCP server — native Claude Code integration |
 
+## Contributing
+
+This project uses **conventional commits** (enforced by commitlint + husky) and **changesets** for semantic versioning.
+
+```bash
+# After making changes:
+pnpm changeset                    # describe what changed + semver bump type
+git add . && git commit -m "feat(core): add new feature"
+
+# To release:
+pnpm version                      # bump versions + generate changelogs
+git add . && git commit -m "chore(release): v0.2.0"
+pnpm release                      # build + publish to npm
+```
+
+Commit message format: `type(scope): description`
+
+Types: `feat`, `fix`, `chore`, `docs`, `refactor`, `test`, `perf`
+Scopes: `core`, `cli`, `mcp`, `deps`, `release`, `repo`
+
 ## Roadmap
 
 - [x] Local SQLite storage
@@ -187,6 +233,7 @@ ACP automatically deduplicates facts across sessions using Jaccard similarity �
 - [x] Claude Code session import
 - [x] MCP server integration
 - [x] CLI with all commands
+- [x] Conventional commits + semantic versioning
 - [ ] Semantic embedding search (transformers.js)
 - [ ] Cloud storage (Supabase adapter)
 - [ ] Self-hosted PostgreSQL + pgvector
@@ -195,10 +242,10 @@ ACP automatically deduplicates facts across sessions using Jaccard similarity �
 - [ ] Cross-device sync
 - [ ] Team collaboration / shared memory
 
-## Contributing
+## License
 
-MIT License. Contributions welcome — especially adapters for new AI tools (Cursor, Codex, Gemini CLI).
+MIT
 
 ## Authors
 
-Robert Dudas — [@RbrtDdds](https://github.com/RbrtDdds)
+Robert Dudas — [@robodudas](https://github.com/robodudas)
