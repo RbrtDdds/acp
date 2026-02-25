@@ -37,6 +37,22 @@ async function main() {
   const acp = new ACP(config);
   await acp.initialize();
 
+  // Set up local embedding provider if configured
+  if (config.embedding?.engine === 'local') {
+    try {
+      const { LocalEmbeddingProvider } = await import('@acp/embeddings');
+      const provider = new LocalEmbeddingProvider({
+        model: config.embedding.model,
+        dimensions: config.embedding.dimensions,
+      });
+      await provider.initialize();
+      acp.setEmbeddingProvider(provider);
+      process.stderr.write(`[ACP] Embedding provider loaded: ${provider.getModel()}\n`);
+    } catch (err: any) {
+      process.stderr.write(`[ACP] Embeddings not available (keyword-only): ${err.message}\n`);
+    }
+  }
+
   const project = detectProject();
   const currentProject = await acp.getOrCreateProject(project.name, project.path);
 
@@ -59,7 +75,7 @@ async function main() {
       const result = await acp.recall({
         query,
         projectId: scope === 'project' ? currentProject.id : undefined,
-        method: 'keyword',
+        // Auto-select: hybrid if embeddings available, keyword otherwise
         maxResults: max_results,
         maxTokens: MCP_MAX_TOKENS,
         format: 'system-prompt',

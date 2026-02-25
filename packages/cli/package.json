@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@acp/core": "workspace:*",
+    "@acp/embeddings": "workspace:*",
     "commander": "^13.1.0",
     "chalk": "^5.4.0",
     "ora": "^8.2.0",

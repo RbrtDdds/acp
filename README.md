@@ -234,7 +234,7 @@ Scopes: `core`, `cli`, `mcp`, `deps`, `release`, `repo`
 - [x] MCP server integration
 - [x] CLI with all commands
 - [x] Conventional commits + semantic versioning
-- [ ] Semantic embedding search (transformers.js)
+- [x] Semantic embedding search (transformers.js, Xenova/all-MiniLM-L6-v2)
 - [ ] Cloud storage (Supabase adapter)
 - [ ] Self-hosted PostgreSQL + pgvector
 - [ ] Codex / Gemini CLI adapters

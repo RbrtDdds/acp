@@ -1,11 +1,15 @@
 {
-  "name": "@acp/mcp",
+  "name": "@acp/embeddings",
   "version": "0.1.0",
-  "description": "AI Context Protocol — MCP server for Claude Code",
+  "description": "AI Context Protocol — local embedding provider using transformers.js",
   "type": "module",
   "main": "./dist/index.js",
-  "bin": {
-    "acp-mcp": "./dist/index.js"
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
   },
   "scripts": {
     "build": "tsc --build",
@@ -14,9 +18,7 @@
   },
   "dependencies": {
     "@acp/core": "workspace:*",
-    "@acp/embeddings": "workspace:*",
-    "@modelcontextprotocol/sdk": "^1.12.0",
-    "zod": "^3.24.0"
+    "@huggingface/transformers": "^3.4.0"
   },
   "devDependencies": {
     "typescript": "^5.7.0",
