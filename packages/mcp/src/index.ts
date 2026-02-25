@@ -3,7 +3,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { ACP } from '@acp/core';
+import { ACP } from '@rbrtdds/acp-core';
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
@@ -40,7 +40,7 @@ async function main() {
   // Set up local embedding provider if configured
   if (config.embedding?.engine === 'local') {
     try {
-      const { LocalEmbeddingProvider } = await import('@acp/embeddings');
+      const { LocalEmbeddingProvider } = await import('@rbrtdds/acp-embeddings');
       const provider = new LocalEmbeddingProvider({
         model: config.embedding.model,
         dimensions: config.embedding.dimensions,

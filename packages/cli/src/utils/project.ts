@@ -1,5 +1,5 @@
 import chalk from 'chalk';
-import type { Project } from '@acp/core';
+import type { Project } from '@rbrtdds/acp-core';
 
 /**
  * Find a project by name from the list.

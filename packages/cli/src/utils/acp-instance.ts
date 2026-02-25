@@ -1,4 +1,4 @@
-import { ACP } from '@acp/core';
+import { ACP } from '@rbrtdds/acp-core';
 import { loadConfig } from './config.js';
 
 /**
@@ -13,7 +13,7 @@ export async function createACP(): Promise<ACP> {
   // Set up embedding provider if engine is 'local'
   if (config.embedding?.engine === 'local') {
     try {
-      const { LocalEmbeddingProvider } = await import('@acp/embeddings');
+      const { LocalEmbeddingProvider } = await import('@rbrtdds/acp-embeddings');
       const provider = new LocalEmbeddingProvider({
         model: config.embedding.model,
         dimensions: config.embedding.dimensions,

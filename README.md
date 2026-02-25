@@ -191,10 +191,10 @@ ACP automatically deduplicates facts across sessions using a two-pass approach: 
 │          Claude Code (claude CLI)         │
 │              ↕ MCP protocol               │
 ├──────────────────────────────────────────┤
-│          ACP MCP Server (@acp/mcp)       │
+│          ACP MCP Server (@rbrtdds/acp-mcp)       │
 │   acp_context │ acp_recall │ acp_remember │
 ├──────────────────────────────────────────┤
-│          ACP Core (@acp/core)            │
+│          ACP Core (@rbrtdds/acp-core)            │
 │   Fact Extractor │ Recall Engine │       │
 │   Compaction    │ Claude Reader  │       │
 ├──────────────────────────────────────────┤
@@ -207,10 +207,10 @@ ACP automatically deduplicates facts across sessions using a two-pass approach: 
 
 | Package | Description |
 |---------|-------------|
-| `@acp/core` | Core library — models, adapters, engines |
-| `@acp/cli` | CLI tool — `acp init`, `acp recall`, etc. |
-| `@acp/mcp` | MCP server — native Claude Code integration |
-| `@acp/embeddings` | Optional local embedding provider (transformers.js) |
+| `@rbrtdds/acp-core` | Core library — models, adapters, engines |
+| `@rbrtdds/acp-cli` | CLI tool — `acp init`, `acp recall`, etc. |
+| `@rbrtdds/acp-mcp` | MCP server — native Claude Code integration |
+| `@rbrtdds/acp-embeddings` | Optional local embedding provider (transformers.js) |
 
 ## Contributing
 

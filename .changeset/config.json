@@ -4,7 +4,7 @@
   "commit": false,
   "fixed": [],
   "linked": [
-    ["@acp/core", "@acp/cli", "@acp/mcp", "@acp/embeddings"]
+    ["@rbrtdds/acp-core", "@rbrtdds/acp-cli", "@rbrtdds/acp-mcp", "@rbrtdds/acp-embeddings"]
   ],
   "access": "public",
   "baseBranch": "main",

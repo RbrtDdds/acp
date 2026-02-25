@@ -14,10 +14,10 @@ importers:
 
   packages/cli:
     dependencies:
-      '@acp/core':
+      '@rbrtdds/acp-core':
         specifier: workspace:*
         version: link:../core
-      '@acp/embeddings':
+      '@rbrtdds/acp-embeddings':
         specifier: workspace:*
         version: link:../embeddings
       chalk:
@@ -73,12 +73,12 @@ importers:
 
   packages/embeddings:
     dependencies:
-      '@acp/core':
-        specifier: workspace:*
-        version: link:../core
       '@huggingface/transformers':
         specifier: ^3.4.0
         version: 3.8.1
+      '@rbrtdds/acp-core':
+        specifier: workspace:*
+        version: link:../core
     devDependencies:
       '@types/node':
         specifier: ^22.0.0
@@ -89,15 +89,15 @@ importers:
 
   packages/mcp:
     dependencies:
-      '@acp/core':
-        specifier: workspace:*
-        version: link:../core
-      '@acp/embeddings':
-        specifier: workspace:*
-        version: link:../embeddings
       '@modelcontextprotocol/sdk':
         specifier: ^1.12.0
         version: 1.27.1(zod@3.25.76)
+      '@rbrtdds/acp-core':
+        specifier: workspace:*
+        version: link:../core
+      '@rbrtdds/acp-embeddings':
+        specifier: workspace:*
+        version: link:../embeddings
       zod:
         specifier: ^3.24.0
         version: 3.25.76

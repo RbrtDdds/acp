@@ -1,7 +1,7 @@
 # ACP Code Review
 
 **Date**: 2026-02-25
-**Scope**: Full codebase — @acp/core, @acp/cli, @acp/mcp
+**Scope**: Full codebase — @rbrtdds/acp-core, @rbrtdds/acp-cli, @rbrtdds/acp-mcp
 **Reviewer**: Claude (automated)
 
 ---

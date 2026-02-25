@@ -1,5 +1,5 @@
 {
-  "name": "@acp/embeddings",
+  "name": "@rbrtdds/acp-embeddings",
   "version": "0.1.0",
   "description": "AI Context Protocol — local embedding provider using transformers.js",
   "type": "module",
@@ -39,7 +39,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@acp/core": "workspace:*",
+    "@rbrtdds/acp-core": "workspace:*",
     "@huggingface/transformers": "^3.4.0"
   },
   "devDependencies": {

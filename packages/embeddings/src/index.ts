@@ -1,18 +1,18 @@
 /**
- * @acp/embeddings — Local embedding provider using transformers.js
+ * @rbrtdds/acp-embeddings — Local embedding provider using transformers.js
  *
  * Uses Xenova/all-MiniLM-L6-v2 (384 dimensions) by default.
  * Model is downloaded on first use and cached locally.
  *
  * Usage:
- *   import { LocalEmbeddingProvider } from '@acp/embeddings';
+ *   import { LocalEmbeddingProvider } from '@rbrtdds/acp-embeddings';
  *   const provider = new LocalEmbeddingProvider();
  *   await provider.initialize();
  *   acp.setEmbeddingProvider(provider);
  */
 
 import { pipeline, env } from '@huggingface/transformers';
-import type { EmbeddingProvider } from '@acp/core';
+import type { EmbeddingProvider } from '@rbrtdds/acp-core';
 import { join } from 'path';
 import { homedir } from 'os';
 

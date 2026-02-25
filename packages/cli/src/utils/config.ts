@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
-import type { ACPConfig } from '@acp/core';
+import type { ACPConfig } from '@rbrtdds/acp-core';
 
 const ACP_DIR = join(homedir(), '.acp');
 const CONFIG_PATH = join(ACP_DIR, 'config.json');

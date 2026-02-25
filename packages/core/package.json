@@ -1,5 +1,5 @@
 {
-  "name": "@acp/core",
+  "name": "@rbrtdds/acp-core",
   "version": "0.1.0",
   "description": "AI Context Protocol — core library for persistent AI memory",
   "type": "module",

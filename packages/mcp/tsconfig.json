@@ -4,8 +4,8 @@
     "outDir": "./dist",
     "rootDir": "./src",
     "paths": {
-      "@acp/core": ["../core/src/index.ts"],
-      "@acp/embeddings": ["../embeddings/src/index.ts"]
+      "@rbrtdds/acp-core": ["../core/src/index.ts"],
+      "@rbrtdds/acp-embeddings": ["../embeddings/src/index.ts"]
     }
   },
   "include": ["src/**/*"],

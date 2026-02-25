@@ -1,5 +1,5 @@
 {
-  "name": "@acp/mcp",
+  "name": "@rbrtdds/acp-mcp",
   "version": "0.1.0",
   "description": "AI Context Protocol — MCP server for Claude Code integration",
   "type": "module",
@@ -35,8 +35,8 @@
     "access": "public"
   },
   "dependencies": {
-    "@acp/core": "workspace:*",
-    "@acp/embeddings": "workspace:*",
+    "@rbrtdds/acp-core": "workspace:*",
+    "@rbrtdds/acp-embeddings": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.12.0",
     "zod": "^3.24.0"
   },

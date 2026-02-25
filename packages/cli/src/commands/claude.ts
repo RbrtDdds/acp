@@ -4,7 +4,7 @@ import { writeFileSync, readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import chalk from 'chalk';
 import { createACP } from '../utils/acp-instance.js';
-import type { Project } from '@acp/core';
+import type { Project } from '@rbrtdds/acp-core';
 
 /**
  * `acp claude` — wraps Claude Code CLI with persistent memory.

@@ -14,7 +14,7 @@
     "forceConsistentCasingInFileNames": true,
     "composite": true,
     "paths": {
-      "@acp/core": ["../core/src/index.ts"]
+      "@rbrtdds/acp-core": ["../core/src/index.ts"]
     }
   },
   "include": ["src/**/*.ts"],
