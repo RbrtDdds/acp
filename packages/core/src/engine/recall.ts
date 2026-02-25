@@ -89,10 +89,10 @@ export class RecallEngine {
     if (method === 'keyword' || (method === 'hybrid' && !this.embedder)) {
       scored = this.keywordSearch(query, filtered);
     } else if (method === 'semantic' && this.embedder) {
-      scored = await this.semanticSearch(query, filtered);
+      scored = await this.semanticSearch(query, filtered, projectId);
     } else if (method === 'hybrid' && this.embedder) {
       const keywordResults = this.keywordSearch(query, filtered);
-      const semanticResults = await this.semanticSearch(query, filtered);
+      const semanticResults = await this.semanticSearch(query, filtered, projectId);
       scored = this.mergeResults(keywordResults, semanticResults, weights);
     }
 
@@ -155,11 +155,11 @@ export class RecallEngine {
 
   // === Semantic Search ===
 
-  private async semanticSearch(query: string, facts: SemanticFact[]): Promise<ScoredFact[]> {
+  private async semanticSearch(query: string, facts: SemanticFact[], projectId?: string): Promise<ScoredFact[]> {
     if (!this.embedder) return [];
 
     const queryEmbedding = await this.embedder.embed(query);
-    const allEmbeddings = await this.storage.getAllEmbeddings();
+    const allEmbeddings = await this.storage.getAllEmbeddings(projectId);
 
     // Map fact IDs for quick lookup
     const factMap = new Map(facts.map((f) => [f.id, f]));

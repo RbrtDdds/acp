@@ -4,11 +4,13 @@
     "outDir": "./dist",
     "rootDir": "./src",
     "paths": {
-      "@acp/core": ["../core/src/index.ts"]
+      "@acp/core": ["../core/src/index.ts"],
+      "@acp/embeddings": ["../embeddings/src/index.ts"]
     }
   },
   "include": ["src/**/*"],
   "references": [
-    { "path": "../core" }
+    { "path": "../core" },
+    { "path": "../embeddings" }
   ]
 }

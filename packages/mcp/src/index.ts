@@ -68,7 +68,7 @@ async function main() {
     'Search your project memory for relevant context from previous sessions. Use this when the user references past work, asks about decisions made earlier, or when you need context about the project history.',
     {
       query: z.string().max(MAX_QUERY_LENGTH).describe('What to search for (e.g. "auth middleware", "database schema decisions")'),
-      scope: z.enum(['project', 'all']).default('all').describe('Search current project only, or all projects'),
+      scope: z.enum(['project', 'all']).default('project').describe('Search current project only (default), or all projects'),
       max_results: z.number().default(10).describe('Maximum number of facts to return'),
     },
     async ({ query, scope, max_results }) => {
@@ -244,7 +244,7 @@ async function main() {
       const result = await acp.enrichMessage(
         `Working on ${currentProject.name} in ${project.path}`,
         currentProject.id,
-        { maxTokens: MCP_MAX_TOKENS, scope: 'all' }
+        { maxTokens: MCP_MAX_TOKENS, scope: 'project' }
       );
 
       if (result.facts.length === 0) {

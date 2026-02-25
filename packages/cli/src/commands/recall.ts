@@ -16,15 +16,25 @@ export const recallCommand = new Command('recall')
     try {
       let projectId: string | undefined;
 
-      if (options.project) {
+      if (options.all) {
+        // Explicit --all: search everything
+        projectId = undefined;
+      } else if (options.project) {
+        // Explicit --project: search named project
         const project = await findProjectByName(acp, options.project);
         if (!project) return;
+        projectId = project.id;
+      } else {
+        // Default: auto-detect current project from CWD
+        const cwd = process.cwd();
+        const name = cwd.split('/').pop() || 'unnamed';
+        const project = await acp.getOrCreateProject(name, cwd);
         projectId = project.id;
       }
 
       const result = await acp.recall({
         query,
-        projectId: options.all ? undefined : projectId,
+        projectId,
         maxTokens: parseInt(options.tokens),
         format: options.format as any,
       });
