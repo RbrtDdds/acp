@@ -104,8 +104,9 @@ export class ClaudeCodeReader {
           if (msg.timestamp < startedAt) startedAt = msg.timestamp;
           if (msg.timestamp > endedAt) endedAt = msg.timestamp;
         }
-      } catch {
-        // Skip malformed lines
+      } catch (err) {
+        // Skip malformed JSONL lines (common with partial writes)
+        process.stderr?.write?.(`[ACP] Skipping malformed JSONL line in ${sessionId}: ${err}\n`);
         continue;
       }
     }

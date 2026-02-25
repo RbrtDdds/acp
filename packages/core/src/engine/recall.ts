@@ -1,6 +1,13 @@
 import type { SemanticFact } from '../models/schemas.js';
 import type { StorageAdapter } from '../adapters/storage.interface.js';
 
+/** Recall engine constants */
+const HIGH_CONFIDENCE_THRESHOLD = 0.85;
+const SEMANTIC_MIN_THRESHOLD = 0.3;
+const DEFAULT_MAX_RESULTS = 20;
+const DEFAULT_MAX_TOKENS = 800;
+const DEFAULT_MIN_CONFIDENCE = 0.5;
+
 /**
  * Embedding provider interface — pluggable embedding backends.
  */
@@ -58,9 +65,9 @@ export class RecallEngine {
       projectId,
       method = this.embedder ? 'hybrid' : 'keyword',
       weights = { keyword: 0.3, semantic: 0.7 },
-      maxResults = 20,
-      maxTokens = 800,
-      minConfidence = 0.5,
+      maxResults = DEFAULT_MAX_RESULTS,
+      maxTokens = DEFAULT_MAX_TOKENS,
+      minConfidence = DEFAULT_MIN_CONFIDENCE,
       factTypes,
       format = 'system-prompt',
     } = options;
@@ -169,7 +176,7 @@ export class RecallEngine {
           matchType: 'semantic' as const,
         };
       })
-      .filter((sf) => sf.score > 0.3); // minimum semantic threshold
+      .filter((sf) => sf.score > SEMANTIC_MIN_THRESHOLD); // minimum semantic threshold
   }
 
   // === Merge Results ===
@@ -254,7 +261,7 @@ export class RecallEngine {
   ): RecallResult['suggestion'] {
     if (facts.length === 0) return 'NONE';
 
-    const highConfidence = facts.filter((sf) => sf.score > 0.85);
+    const highConfidence = facts.filter((sf) => sf.score > HIGH_CONFIDENCE_THRESHOLD);
     if (highConfidence.length > 0) return 'REFERENCE_PREVIOUS_WORK';
 
     const crossProject = facts.filter((sf) => sf.fact.projectId !== currentProjectId);
@@ -295,7 +302,7 @@ export class RecallEngine {
     const lines: string[] = [];
 
     // Active recall (high confidence matches)
-    const activeRecall = facts.filter((sf) => sf.score > 0.85);
+    const activeRecall = facts.filter((sf) => sf.score > HIGH_CONFIDENCE_THRESHOLD);
     if (activeRecall.length > 0) {
       lines.push('[ACP ACTIVE RECALL — high confidence match]');
       for (const sf of activeRecall) {

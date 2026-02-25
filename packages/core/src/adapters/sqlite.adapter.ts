@@ -1,6 +1,6 @@
 import initSqlJs, { type Database } from 'sql.js';
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
-import { dirname } from 'path';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from 'fs';
+import { dirname, join } from 'path';
 import type { StorageAdapter } from './storage.interface.js';
 import type { Project, Session, SemanticFact, Relation, Message } from '../models/schemas.js';
 
@@ -11,6 +11,7 @@ import type { Project, Session, SemanticFact, Relation, Message } from '../model
 export class SQLiteAdapter implements StorageAdapter {
   private db: Database | null = null;
   private dbPath: string;
+  private inTransaction = false;
 
   constructor(dbPath: string) {
     // Expand ~ to home directory
@@ -54,10 +55,34 @@ export class SQLiteAdapter implements StorageAdapter {
   }
 
   private save(): void {
+    if (this.inTransaction) return; // defer save until transaction ends
     const db = this.getDb();
     const data = db.export();
     const buffer = Buffer.from(data);
-    writeFileSync(this.dbPath, buffer);
+    // Atomic write: write to temp file, then rename
+    const tmpPath = this.dbPath + '.tmp';
+    writeFileSync(tmpPath, buffer);
+    renameSync(tmpPath, this.dbPath);
+  }
+
+  /**
+   * Run a function inside a transaction. Saves to disk only once at the end.
+   */
+  async withTransaction<T>(fn: () => Promise<T>): Promise<T> {
+    const db = this.getDb();
+    db.run('BEGIN TRANSACTION');
+    this.inTransaction = true;
+    try {
+      const result = await fn();
+      db.run('COMMIT');
+      this.inTransaction = false;
+      this.save();
+      return result;
+    } catch (err) {
+      db.run('ROLLBACK');
+      this.inTransaction = false;
+      throw err;
+    }
   }
 
   private createTables(): void {
@@ -169,40 +194,43 @@ export class SQLiteAdapter implements StorageAdapter {
   async getProject(id: string): Promise<Project | null> {
     const db = this.getDb();
     const stmt = db.prepare('SELECT * FROM projects WHERE id = ?');
-    stmt.bind([id]);
-    if (stmt.step()) {
-      const row = stmt.getAsObject();
+    try {
+      stmt.bind([id]);
+      if (stmt.step()) {
+        return this.rowToProject(stmt.getAsObject());
+      }
+      return null;
+    } finally {
       stmt.free();
-      return this.rowToProject(row);
     }
-    stmt.free();
-    return null;
   }
 
   async getProjectByName(name: string): Promise<Project | null> {
     const db = this.getDb();
     const stmt = db.prepare('SELECT * FROM projects WHERE name = ?');
-    stmt.bind([name]);
-    if (stmt.step()) {
-      const row = stmt.getAsObject();
+    try {
+      stmt.bind([name]);
+      if (stmt.step()) {
+        return this.rowToProject(stmt.getAsObject());
+      }
+      return null;
+    } finally {
       stmt.free();
-      return this.rowToProject(row);
     }
-    stmt.free();
-    return null;
   }
 
   async getProjectByPath(path: string): Promise<Project | null> {
     const db = this.getDb();
     const stmt = db.prepare('SELECT * FROM projects WHERE path = ?');
-    stmt.bind([path]);
-    if (stmt.step()) {
-      const row = stmt.getAsObject();
+    try {
+      stmt.bind([path]);
+      if (stmt.step()) {
+        return this.rowToProject(stmt.getAsObject());
+      }
+      return null;
+    } finally {
       stmt.free();
-      return this.rowToProject(row);
     }
-    stmt.free();
-    return null;
   }
 
   async listProjects(): Promise<Project[]> {
@@ -247,14 +275,15 @@ export class SQLiteAdapter implements StorageAdapter {
   async getSession(id: string): Promise<Session | null> {
     const db = this.getDb();
     const stmt = db.prepare('SELECT * FROM sessions WHERE id = ?');
-    stmt.bind([id]);
-    if (stmt.step()) {
-      const row = stmt.getAsObject();
+    try {
+      stmt.bind([id]);
+      if (stmt.step()) {
+        return this.rowToSession(stmt.getAsObject());
+      }
+      return null;
+    } finally {
       stmt.free();
-      return this.rowToSession(row);
     }
-    stmt.free();
-    return null;
   }
 
   async listSessions(projectId: string, options?: {
@@ -284,13 +313,16 @@ export class SQLiteAdapter implements StorageAdapter {
     }
 
     const stmt = db.prepare(query);
-    stmt.bind(params);
-    const sessions: Session[] = [];
-    while (stmt.step()) {
-      sessions.push(this.rowToSession(stmt.getAsObject()));
+    try {
+      stmt.bind(params);
+      const sessions: Session[] = [];
+      while (stmt.step()) {
+        sessions.push(this.rowToSession(stmt.getAsObject()));
+      }
+      return sessions;
+    } finally {
+      stmt.free();
     }
-    stmt.free();
-    return sessions;
   }
 
   async updateSession(session: Partial<Session> & { id: string }): Promise<void> {
@@ -322,30 +354,36 @@ export class SQLiteAdapter implements StorageAdapter {
     const stmt = db.prepare(
       'INSERT INTO messages (sessionId, role, content, timestamp, source, metadata) VALUES (?, ?, ?, ?, ?, ?)'
     );
-    for (const msg of messages) {
-      stmt.run([sessionId, msg.role, msg.content, msg.timestamp, msg.source, msg.metadata ? JSON.stringify(msg.metadata) : null]);
+    try {
+      for (const msg of messages) {
+        stmt.run([sessionId, msg.role, msg.content, msg.timestamp, msg.source, msg.metadata ? JSON.stringify(msg.metadata) : null]);
+      }
+    } finally {
+      stmt.free();
     }
-    stmt.free();
     this.save();
   }
 
   async getMessages(sessionId: string): Promise<Message[]> {
     const db = this.getDb();
     const stmt = db.prepare('SELECT * FROM messages WHERE sessionId = ? ORDER BY timestamp ASC');
-    stmt.bind([sessionId]);
-    const messages: Message[] = [];
-    while (stmt.step()) {
-      const row = stmt.getAsObject();
-      messages.push({
-        role: row.role as Message['role'],
-        content: row.content as string,
-        timestamp: row.timestamp as number,
-        source: row.source as string,
-        metadata: row.metadata ? JSON.parse(row.metadata as string) : undefined,
-      });
+    try {
+      stmt.bind([sessionId]);
+      const messages: Message[] = [];
+      while (stmt.step()) {
+        const row = stmt.getAsObject();
+        messages.push({
+          role: row.role as Message['role'],
+          content: row.content as string,
+          timestamp: row.timestamp as number,
+          source: row.source as string,
+          metadata: row.metadata ? JSON.parse(row.metadata as string) : undefined,
+        });
+      }
+      return messages;
+    } finally {
+      stmt.free();
     }
-    stmt.free();
-    return messages;
   }
 
   async deleteMessages(sessionId: string): Promise<void> {
@@ -371,14 +409,15 @@ export class SQLiteAdapter implements StorageAdapter {
   async getFact(id: string): Promise<SemanticFact | null> {
     const db = this.getDb();
     const stmt = db.prepare('SELECT * FROM facts WHERE id = ?');
-    stmt.bind([id]);
-    if (stmt.step()) {
-      const row = stmt.getAsObject();
+    try {
+      stmt.bind([id]);
+      if (stmt.step()) {
+        return this.rowToFact(stmt.getAsObject());
+      }
+      return null;
+    } finally {
       stmt.free();
-      return this.rowToFact(row);
     }
-    stmt.free();
-    return null;
   }
 
   async listFacts(options?: {
@@ -400,13 +439,16 @@ export class SQLiteAdapter implements StorageAdapter {
     if (options?.limit) { query += ' LIMIT ?'; params.push(options.limit); }
 
     const stmt = db.prepare(query);
-    stmt.bind(params);
-    const facts: SemanticFact[] = [];
-    while (stmt.step()) {
-      facts.push(this.rowToFact(stmt.getAsObject()));
+    try {
+      stmt.bind(params);
+      const facts: SemanticFact[] = [];
+      while (stmt.step()) {
+        facts.push(this.rowToFact(stmt.getAsObject()));
+      }
+      return facts;
+    } finally {
+      stmt.free();
     }
-    stmt.free();
-    return facts;
   }
 
   async updateFact(fact: Partial<SemanticFact> & { id: string }): Promise<void> {
@@ -444,15 +486,17 @@ export class SQLiteAdapter implements StorageAdapter {
   async getEmbedding(factId: string): Promise<Float32Array | null> {
     const db = this.getDb();
     const stmt = db.prepare('SELECT embedding FROM embeddings WHERE factId = ?');
-    stmt.bind([factId]);
-    if (stmt.step()) {
-      const row = stmt.getAsObject();
+    try {
+      stmt.bind([factId]);
+      if (stmt.step()) {
+        const row = stmt.getAsObject();
+        const blob = row.embedding as Uint8Array;
+        return new Float32Array(blob.buffer, blob.byteOffset, blob.byteLength / 4);
+      }
+      return null;
+    } finally {
       stmt.free();
-      const blob = row.embedding as Uint8Array;
-      return new Float32Array(blob.buffer, blob.byteOffset, blob.byteLength / 4);
     }
-    stmt.free();
-    return null;
   }
 
   async getAllEmbeddings(projectId?: string): Promise<Array<{ factId: string; embedding: Float32Array }>> {
@@ -466,18 +510,21 @@ export class SQLiteAdapter implements StorageAdapter {
     }
 
     const stmt = db.prepare(query);
-    stmt.bind(params);
-    const results: Array<{ factId: string; embedding: Float32Array }> = [];
-    while (stmt.step()) {
-      const row = stmt.getAsObject();
-      const blob = row.embedding as Uint8Array;
-      results.push({
-        factId: row.factId as string,
-        embedding: new Float32Array(blob.buffer, blob.byteOffset, blob.byteLength / 4),
-      });
+    try {
+      stmt.bind(params);
+      const results: Array<{ factId: string; embedding: Float32Array }> = [];
+      while (stmt.step()) {
+        const row = stmt.getAsObject();
+        const blob = row.embedding as Uint8Array;
+        results.push({
+          factId: row.factId as string,
+          embedding: new Float32Array(blob.buffer, blob.byteOffset, blob.byteLength / 4),
+        });
+      }
+      return results;
+    } finally {
+      stmt.free();
     }
-    stmt.free();
-    return results;
   }
 
   // === Relations ===
@@ -496,20 +543,23 @@ export class SQLiteAdapter implements StorageAdapter {
     const stmt = db.prepare(
       'SELECT * FROM relations WHERE sourceFactId = ? OR targetFactId = ?'
     );
-    stmt.bind([factId, factId]);
-    const relations: Relation[] = [];
-    while (stmt.step()) {
-      const row = stmt.getAsObject();
-      relations.push({
-        id: row.id as string,
-        sourceFactId: row.sourceFactId as string,
-        targetFactId: row.targetFactId as string,
-        type: row.type as Relation['type'],
-        createdAt: row.createdAt as number,
-      });
+    try {
+      stmt.bind([factId, factId]);
+      const relations: Relation[] = [];
+      while (stmt.step()) {
+        const row = stmt.getAsObject();
+        relations.push({
+          id: row.id as string,
+          sourceFactId: row.sourceFactId as string,
+          targetFactId: row.targetFactId as string,
+          type: row.type as Relation['type'],
+          createdAt: row.createdAt as number,
+        });
+      }
+      return relations;
+    } finally {
+      stmt.free();
     }
-    stmt.free();
-    return relations;
   }
 
   async deleteRelation(id: string): Promise<void> {
@@ -539,32 +589,72 @@ export class SQLiteAdapter implements StorageAdapter {
     factsByType: Record<string, number>;
   }> {
     const db = this.getDb();
-    const projectFilter = projectId ? ` WHERE projectId = '${projectId}'` : '';
 
     const totalProjects = (db.exec('SELECT COUNT(*) as c FROM projects')[0]?.values[0]?.[0] as number) || 0;
-    const totalSessions = (db.exec(`SELECT COUNT(*) as c FROM sessions${projectFilter}`)[0]?.values[0]?.[0] as number) || 0;
-    const totalFacts = (db.exec(`SELECT COUNT(*) as c FROM facts${projectFilter}`)[0]?.values[0]?.[0] as number) || 0;
-    const totalMessages = (db.exec(`SELECT COUNT(*) as c FROM messages${projectId ? ` WHERE sessionId IN (SELECT id FROM sessions WHERE projectId = '${projectId}')` : ''}`)[0]?.values[0]?.[0] as number) || 0;
+
+    // Use parameterized queries to prevent SQL injection
+    const totalSessions = this.queryCount(db, 'sessions', projectId);
+    const totalFacts = this.queryCount(db, 'facts', projectId);
+
+    let totalMessages = 0;
+    if (projectId) {
+      const msgStmt = db.prepare('SELECT COUNT(*) as c FROM messages WHERE sessionId IN (SELECT id FROM sessions WHERE projectId = ?)');
+      try {
+        msgStmt.bind([projectId]);
+        if (msgStmt.step()) totalMessages = (msgStmt.getAsObject().c as number) || 0;
+      } finally {
+        msgStmt.free();
+      }
+    } else {
+      totalMessages = (db.exec('SELECT COUNT(*) as c FROM messages')[0]?.values[0]?.[0] as number) || 0;
+    }
 
     const storageBytes = await this.getStorageSize();
 
     const sessionsByTier: Record<string, number> = {};
-    const tierResults = db.exec(`SELECT tier, COUNT(*) as c FROM sessions${projectFilter} GROUP BY tier`);
-    if (tierResults.length) {
-      for (const row of tierResults[0].values) {
-        sessionsByTier[row[0] as string] = row[1] as number;
+    const tierStmt = projectId
+      ? db.prepare('SELECT tier, COUNT(*) as c FROM sessions WHERE projectId = ? GROUP BY tier')
+      : db.prepare('SELECT tier, COUNT(*) as c FROM sessions GROUP BY tier');
+    try {
+      if (projectId) tierStmt.bind([projectId]);
+      while (tierStmt.step()) {
+        const row = tierStmt.getAsObject();
+        sessionsByTier[row.tier as string] = row.c as number;
       }
+    } finally {
+      tierStmt.free();
     }
 
     const factsByType: Record<string, number> = {};
-    const typeResults = db.exec(`SELECT type, COUNT(*) as c FROM facts${projectFilter} GROUP BY type`);
-    if (typeResults.length) {
-      for (const row of typeResults[0].values) {
-        factsByType[row[0] as string] = row[1] as number;
+    const typeStmt = projectId
+      ? db.prepare('SELECT type, COUNT(*) as c FROM facts WHERE projectId = ? GROUP BY type')
+      : db.prepare('SELECT type, COUNT(*) as c FROM facts GROUP BY type');
+    try {
+      if (projectId) typeStmt.bind([projectId]);
+      while (typeStmt.step()) {
+        const row = typeStmt.getAsObject();
+        factsByType[row.type as string] = row.c as number;
       }
+    } finally {
+      typeStmt.free();
     }
 
     return { totalProjects, totalSessions, totalFacts, totalMessages, storageBytes, sessionsByTier, factsByType };
+  }
+
+  /** Count rows in a table with optional project filter (safe from SQL injection — table name is hardcoded). */
+  private queryCount(db: Database, table: 'sessions' | 'facts', projectId?: string): number {
+    if (projectId) {
+      const stmt = db.prepare(`SELECT COUNT(*) as c FROM ${table} WHERE projectId = ?`);
+      try {
+        stmt.bind([projectId]);
+        if (stmt.step()) return (stmt.getAsObject().c as number) || 0;
+      } finally {
+        stmt.free();
+      }
+      return 0;
+    }
+    return (db.exec(`SELECT COUNT(*) as c FROM ${table}`)[0]?.values[0]?.[0] as number) || 0;
   }
 
   // === Row mappers ===

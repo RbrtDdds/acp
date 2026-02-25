@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import type { Project } from '@acp/core';
 import { createACP } from '../utils/acp-instance.js';
+import { findProjectByName } from '../utils/project.js';
 
 export const sessionsCommand = new Command('sessions')
   .description('List sessions for a project')
@@ -12,14 +12,8 @@ export const sessionsCommand = new Command('sessions')
     const acp = await createACP();
 
     try {
-      const projects = await acp.listProjects();
-      const project = projects.find((p: Project) => p.name === projectName);
-
-      if (!project) {
-        console.log(chalk.red(`\nProject "${projectName}" not found.`));
-        console.log(`Available: ${projects.map((p: Project) => p.name).join(', ')}\n`);
-        return;
-      }
+      const project = await findProjectByName(acp, projectName);
+      if (!project) return;
 
       const sessions = await acp.listSessions(project.id, {
         limit: parseInt(options.limit),
@@ -45,7 +39,7 @@ export const sessionsCommand = new Command('sessions')
 
       for (const session of sessions) {
         const id = session.id.slice(0, 8);
-        const date = new Date(session.lastAccessed).toLocaleDateString('sk-SK', {
+        const date = new Date(session.lastAccessed).toLocaleDateString(undefined, {
           day: '2-digit', month: '2-digit', year: 'numeric',
           hour: '2-digit', minute: '2-digit',
         });

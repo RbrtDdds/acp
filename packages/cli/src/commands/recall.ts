@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import type { Project } from '@acp/core';
 import { createACP } from '../utils/acp-instance.js';
+import { findProjectByName } from '../utils/project.js';
 
 export const recallCommand = new Command('recall')
   .description('Recall relevant context for a query')
@@ -17,12 +17,8 @@ export const recallCommand = new Command('recall')
       let projectId: string | undefined;
 
       if (options.project) {
-        const projects = await acp.listProjects();
-        const project = projects.find((p: Project) => p.name === options.project);
-        if (!project) {
-          console.log(chalk.red(`\nProject "${options.project}" not found.\n`));
-          return;
-        }
+        const project = await findProjectByName(acp, options.project);
+        if (!project) return;
         projectId = project.id;
       }
 
@@ -38,14 +34,8 @@ export const recallCommand = new Command('recall')
         return;
       }
 
-      if (options.format === 'system-prompt') {
-        // Output raw text — useful for piping to claude
-        console.log(result.text);
-      } else if (options.format === 'structured') {
-        console.log(result.text);
-      } else {
-        console.log(result.text);
-      }
+      // Format is handled by recall engine — output the formatted text
+      console.log(result.text);
 
       // Show metadata on stderr (doesn't interfere with piping)
       console.error(chalk.dim(`\n--- ACP Recall: ${result.facts.length} facts, ~${result.tokenEstimate} tokens, suggestion: ${result.suggestion} ---\n`));

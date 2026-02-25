@@ -1,6 +1,13 @@
 import { v4 as uuid } from 'uuid';
 import type { SemanticFact, FactType, Message } from '../models/schemas.js';
 
+/** Deduplication threshold: facts above this similarity are considered duplicates */
+const SIMILARITY_THRESHOLD = 0.8;
+/** Minimum content length for extracted facts */
+const MIN_CONTENT_LENGTH = 5;
+/** Maximum content length for extracted facts */
+const MAX_CONTENT_LENGTH = 200;
+
 /**
  * Pattern-based rule for extracting facts from conversations.
  */
@@ -107,7 +114,7 @@ export class FactExtractor {
           }
 
           // Skip very short or very long extractions
-          if (content.length < 5 || content.length > 200) continue;
+          if (content.length < MIN_CONTENT_LENGTH || content.length > MAX_CONTENT_LENGTH) continue;
 
           // Skip noise: file paths, UUIDs, JSON, tool output, code
           if (isNoise(content)) continue;
@@ -170,7 +177,7 @@ export class FactExtractor {
       const duplicate = unique.find(
         (existing) =>
           existing.type === fact.type &&
-          this.similarity(existing.content.toLowerCase(), fact.content.toLowerCase()) > 0.8
+          this.similarity(existing.content.toLowerCase(), fact.content.toLowerCase()) > SIMILARITY_THRESHOLD
       );
 
       if (duplicate) {

@@ -42,8 +42,10 @@ export const statusCommand = new Command('status')
         console.log(`  Storage:   ${compactionStatus.totalSize} / ${compactionStatus.maxSize} (${compactionStatus.usage})`);
 
         // Estimate tokens saved
-        const tokensSaved = stats.totalFacts * 50; // rough: each fact saves ~50 tokens of context
-        const costSaved = (tokensSaved / 1000000) * 3; // rough: $3/M input tokens
+        const TOKENS_PER_FACT = 50;
+        const COST_PER_MILLION_TOKENS = 3;
+        const tokensSaved = stats.totalFacts * TOKENS_PER_FACT;
+        const costSaved = (tokensSaved / 1_000_000) * COST_PER_MILLION_TOKENS;
         console.log(`  Tokens saved: ~${chalk.green(tokensSaved.toLocaleString())} (~$${costSaved.toFixed(2)})`);
         console.log('');
       }

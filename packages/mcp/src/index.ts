@@ -8,13 +8,21 @@ import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 
-// Load ACP config
+/** Constants */
+const MCP_MAX_TOKENS = 1200;
+const MAX_QUERY_LENGTH = 10000;
+
+// Load ACP config with error handling
 function loadACPConfig() {
   const configPath = join(homedir(), '.acp', 'config.json');
   if (!existsSync(configPath)) {
     throw new Error('ACP not initialized. Run "acp init" first.');
   }
-  return JSON.parse(readFileSync(configPath, 'utf-8'));
+  try {
+    return JSON.parse(readFileSync(configPath, 'utf-8'));
+  } catch (err: any) {
+    throw new Error(`Invalid ACP config at ${configPath}: ${err.message}. Fix or delete the file and run "acp init".`);
+  }
 }
 
 // Detect current project from CWD
@@ -43,7 +51,7 @@ async function main() {
     'acp_recall',
     'Search your project memory for relevant context from previous sessions. Use this when the user references past work, asks about decisions made earlier, or when you need context about the project history.',
     {
-      query: z.string().describe('What to search for (e.g. "auth middleware", "database schema decisions")'),
+      query: z.string().max(MAX_QUERY_LENGTH).describe('What to search for (e.g. "auth middleware", "database schema decisions")'),
       scope: z.enum(['project', 'all']).default('all').describe('Search current project only, or all projects'),
       max_results: z.number().default(10).describe('Maximum number of facts to return'),
     },
@@ -53,7 +61,7 @@ async function main() {
         projectId: scope === 'project' ? currentProject.id : undefined,
         method: 'keyword',
         maxResults: max_results,
-        maxTokens: 1200,
+        maxTokens: MCP_MAX_TOKENS,
         format: 'system-prompt',
       });
 
@@ -196,8 +204,8 @@ async function main() {
           );
           totalImported += result.imported;
           totalFacts += result.facts;
-        } catch {
-          // Skip failed imports
+        } catch (err: any) {
+          process.stderr.write(`[ACP] Import failed for ${cp.decodedPath}: ${err.message}\n`);
         }
       }
 
@@ -220,7 +228,7 @@ async function main() {
       const result = await acp.enrichMessage(
         `Working on ${currentProject.name} in ${project.path}`,
         currentProject.id,
-        { maxTokens: 1200, scope: 'all' }
+        { maxTokens: MCP_MAX_TOKENS, scope: 'all' }
       );
 
       if (result.facts.length === 0) {

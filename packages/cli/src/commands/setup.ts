@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import chalk from 'chalk';
@@ -74,7 +74,7 @@ function injectInstructions(claudeMdPath: string, scope: string): void {
         'g'
       );
       existing = existing.replace(regex, ACP_INSTRUCTIONS);
-      writeFileSync(claudeMdPath, existing, 'utf-8');
+      atomicWrite(claudeMdPath, existing);
       console.log(chalk.green(`\n✅ Updated ACP instructions in ${scope} CLAUDE.md`));
       console.log(chalk.dim(`   ${claudeMdPath}\n`));
       return;
@@ -86,12 +86,19 @@ function injectInstructions(claudeMdPath: string, scope: string): void {
     ? `${ACP_INSTRUCTIONS}\n\n${existing}`
     : ACP_INSTRUCTIONS;
 
-  writeFileSync(claudeMdPath, newContent, 'utf-8');
+  atomicWrite(claudeMdPath, newContent);
   console.log(chalk.green(`\n✅ Added ACP instructions to ${scope} CLAUDE.md`));
   console.log(chalk.dim(`   ${claudeMdPath}`));
   console.log('');
   console.log(`   Claude will now automatically use ACP memory in every session.`);
   console.log(`   Run ${chalk.cyan('claude')} to try it out.\n`);
+}
+
+/** Atomic file write: write to temp, then rename (prevents corruption on crash). */
+function atomicWrite(filePath: string, content: string): void {
+  const tmpPath = filePath + '.tmp';
+  writeFileSync(tmpPath, content, 'utf-8');
+  renameSync(tmpPath, filePath);
 }
 
 function escapeRegex(str: string): string {

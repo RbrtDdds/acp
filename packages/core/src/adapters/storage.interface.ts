@@ -9,6 +9,10 @@ export interface StorageAdapter {
   initialize(): Promise<void>;
   close(): Promise<void>;
 
+  // === Transactions ===
+  /** Run a batch operation in a single transaction. Saves to disk only once at the end. */
+  withTransaction<T>(fn: () => Promise<T>): Promise<T>;
+
   // === Projects ===
   createProject(project: Project): Promise<void>;
   getProject(id: string): Promise<Project | null>;

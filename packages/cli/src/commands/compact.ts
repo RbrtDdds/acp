@@ -1,8 +1,8 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
-import type { Project } from '@acp/core';
 import { createACP } from '../utils/acp-instance.js';
+import { findProjectByName } from '../utils/project.js';
 
 export const compactCommand = new Command('compact')
   .description('Run memory compaction (demote old sessions, free storage)')
@@ -14,12 +14,8 @@ export const compactCommand = new Command('compact')
       let projectId: string | undefined;
 
       if (options.project) {
-        const projects = await acp.listProjects();
-        const project = projects.find((p: Project) => p.name === options.project);
-        if (!project) {
-          console.log(chalk.red(`\nProject "${options.project}" not found.\n`));
-          return;
-        }
+        const project = await findProjectByName(acp, options.project);
+        if (!project) return;
         projectId = project.id;
       }
 

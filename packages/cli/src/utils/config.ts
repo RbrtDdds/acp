@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import type { ACPConfig } from '@acp/core';
@@ -31,6 +31,8 @@ export function saveConfig(config: ACPConfig): void {
     mkdirSync(ACP_DIR, { recursive: true });
   }
   writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
+  // Restrict permissions — config may contain cloud credentials
+  try { chmodSync(CONFIG_PATH, 0o600); } catch { /* ignore on Windows */ }
 }
 
 export function getDefaultConfig(storage: 'local' | 'cloud' | 'self-hosted' = 'local'): ACPConfig {

@@ -1,4 +1,5 @@
 import { v4 as uuid } from 'uuid';
+import { createHash } from 'crypto';
 import { SQLiteAdapter } from './adapters/sqlite.adapter.js';
 import { FactExtractor } from './engine/fact-extractor.js';
 import { RecallEngine, type EmbeddingProvider, type RecallOptions, type RecallResult } from './engine/recall.js';
@@ -6,6 +7,15 @@ import { CompactionEngine } from './engine/compaction.js';
 import { ClaudeCodeReader, type ClaudeSession } from './engine/claude-reader.js';
 import type { StorageAdapter } from './adapters/storage.interface.js';
 import type { ACPConfig, Project, Session, SemanticFact, Message } from './models/schemas.js';
+
+/** Constants */
+const SIMILARITY_THRESHOLD = 0.8;
+const HIGH_CONFIDENCE_THRESHOLD = 0.85;
+const SEMANTIC_MIN_THRESHOLD = 0.3;
+const DEFAULT_MAX_TOKENS = 800;
+const MCP_MAX_TOKENS = 1200;
+const TOKENS_PER_FACT_ESTIMATE = 50;
+const MANUAL_SESSION_ID = 'manual';
 
 /**
  * ACP — AI Context Protocol
@@ -24,7 +34,7 @@ export class ACP {
   private config: ACPConfig;
   private storage: StorageAdapter;
   private extractor: FactExtractor;
-  private recall_engine: RecallEngine;
+  private recallEngine: RecallEngine;
   private compaction: CompactionEngine;
   private claudeReader: ClaudeCodeReader;
   private embedder: EmbeddingProvider | null = null;
@@ -54,7 +64,7 @@ export class ACP {
 
     // Initialize engines
     this.extractor = new FactExtractor();
-    this.recall_engine = new RecallEngine(this.storage, this.embedder || undefined);
+    this.recallEngine = new RecallEngine(this.storage, this.embedder || undefined);
     this.compaction = new CompactionEngine(this.storage, this.config.compaction);
     this.claudeReader = new ClaudeCodeReader();
   }
@@ -71,7 +81,7 @@ export class ACP {
    */
   setEmbeddingProvider(provider: EmbeddingProvider): void {
     this.embedder = provider;
-    this.recall_engine = new RecallEngine(this.storage, provider);
+    this.recallEngine = new RecallEngine(this.storage, provider);
   }
 
   /**
@@ -146,40 +156,48 @@ export class ACP {
       pinned: false,
     };
 
-    await this.storage.createSession(session);
-    await this.storage.saveMessages(session.id, messages);
-
-    // Extract facts
+    // Extract facts before transaction (CPU-only, no I/O)
     const extractedFacts = this.extractor.extractFromMessages(messages, projectId, session.id);
 
-    // Cross-session deduplication: skip facts that already exist
+    // Cross-session deduplication: use content hash for O(n) exact dedup,
+    // then Jaccard only for fuzzy dedup on remaining candidates
     const existingFacts = await this.storage.listFacts({ projectId });
+    const existingHashes = new Set(
+      existingFacts.map((f) => this.contentHash(f.type, f.content))
+    );
     const facts = extractedFacts.filter((newFact) => {
+      // O(1) exact dedup via hash
+      const hash = this.contentHash(newFact.type, newFact.content);
+      if (existingHashes.has(hash)) return false;
+      // O(n) fuzzy dedup only for near-duplicates (rare after hash check)
       return !existingFacts.some(
         (existing) =>
           existing.type === newFact.type &&
-          this.contentSimilarity(existing.content, newFact.content) > 0.8
+          this.contentSimilarity(existing.content, newFact.content) > SIMILARITY_THRESHOLD
       );
     });
 
-    // Save facts and compute embeddings
-    for (const fact of facts) {
-      await this.storage.createFact(fact);
+    // Batch all writes in a single transaction (single save() at the end)
+    await this.storage.withTransaction(async () => {
+      await this.storage.createSession(session);
+      await this.storage.saveMessages(session.id, messages);
 
-      // Compute embedding if provider is available
-      if (this.embedder) {
-        try {
-          const embedding = await this.embedder.embed(fact.content);
-          await this.storage.saveEmbedding(fact.id, embedding);
-        } catch {
-          // Embedding failure is non-fatal
+      for (const fact of facts) {
+        await this.storage.createFact(fact);
+
+        if (this.embedder) {
+          try {
+            const embedding = await this.embedder.embed(fact.content);
+            await this.storage.saveEmbedding(fact.id, embedding);
+          } catch (err) {
+            console.error(`[ACP] Embedding failed for fact ${fact.id}: ${err}`);
+          }
         }
       }
-    }
 
-    // Update session with compressed token count
-    const compressedTokens = facts.reduce((sum, f) => sum + Math.ceil(f.content.length / 4), 0);
-    await this.storage.updateSession({ id: session.id, compressedTokenCount: compressedTokens });
+      const compressedTokens = facts.reduce((sum, f) => sum + Math.ceil(f.content.length / 4), 0);
+      await this.storage.updateSession({ id: session.id, compressedTokenCount: compressedTokens });
+    });
 
     return { session, facts };
   }
@@ -234,7 +252,7 @@ export class ACP {
    * Find relevant context for a query.
    */
   async recall(options: RecallOptions): Promise<RecallResult> {
-    return this.recall_engine.recall(options);
+    return this.recallEngine.recall(options);
   }
 
   /**
@@ -250,7 +268,7 @@ export class ACP {
       query: userMessage,
       projectId: options?.scope === 'all' ? undefined : projectId,
       method: this.embedder ? 'hybrid' : 'keyword',
-      maxTokens: options?.maxTokens || 800,
+      maxTokens: options?.maxTokens || DEFAULT_MAX_TOKENS,
       format: 'system-prompt',
     });
   }
@@ -270,7 +288,7 @@ export class ACP {
     const now = Date.now();
     const fact: SemanticFact = {
       id: uuid(),
-      sessionId: 'manual',
+      sessionId: MANUAL_SESSION_ID,
       projectId,
       type,
       content,
@@ -280,7 +298,7 @@ export class ACP {
       lastUsed: now,
       useCount: 0,
       pinned: options?.pinned || false,
-      source: { sessionId: 'manual' },
+      source: { sessionId: MANUAL_SESSION_ID },
     };
 
     await this.storage.createFact(fact);
@@ -391,7 +409,15 @@ export class ACP {
   // === Internal ===
 
   /**
-   * Simple Jaccard similarity between two strings.
+   * MD5 hash of normalized content for O(1) exact dedup.
+   */
+  private contentHash(type: string, content: string): string {
+    const normalized = `${type}:${content.toLowerCase().replace(/\s+/g, ' ').trim()}`;
+    return createHash('md5').update(normalized).digest('hex');
+  }
+
+  /**
+   * Jaccard similarity between two strings (for fuzzy dedup).
    */
   private contentSimilarity(a: string, b: string): number {
     const wordsA = new Set(a.toLowerCase().split(/\s+/));
