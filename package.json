@@ -6,9 +6,15 @@
     "build": "pnpm -r build",
     "dev": "pnpm -r --parallel dev",
     "test": "pnpm -r test",
-    "clean": "pnpm -r clean"
+    "clean": "pnpm -r clean",
+    "changeset": "changeset",
+    "version": "changeset version",
+    "release": "pnpm run build && changeset publish"
   },
   "keywords": ["ai", "context", "memory", "cli", "claude", "llm"],
   "author": "Robert Dudas",
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "@changesets/cli": "^2.29.0"
+  }
 }

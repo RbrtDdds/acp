@@ -1,16 +1,38 @@
 {
   "name": "@acp/mcp",
   "version": "0.1.0",
-  "description": "AI Context Protocol — MCP server for Claude Code",
+  "description": "AI Context Protocol — MCP server for Claude Code integration",
   "type": "module",
   "main": "./dist/index.js",
   "bin": {
     "acp-mcp": "./dist/index.js"
   },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsc --build",
     "dev": "tsc --build --watch",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "prepublishOnly": "pnpm run build"
+  },
+  "keywords": ["ai", "context", "memory", "claude", "mcp", "model-context-protocol"],
+  "author": "Robert Dudas",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/robodudas/acp.git",
+    "directory": "packages/mcp"
+  },
+  "homepage": "https://github.com/robodudas/acp#readme",
+  "bugs": "https://github.com/robodudas/acp/issues",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "dependencies": {
     "@acp/core": "workspace:*",
@@ -21,6 +43,5 @@
   "devDependencies": {
     "typescript": "^5.7.0",
     "@types/node": "^22.0.0"
-  },
-  "license": "MIT"
+  }
 }
