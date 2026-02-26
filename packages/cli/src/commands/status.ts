@@ -18,21 +18,29 @@ export const statusCommand = new Command('status')
 
       console.log(chalk.bold('\n🧠 ACP Status\n'));
 
+      let allChunks = 0;
+      let allEmbeddings = 0;
+      let allSessions = 0;
+
       for (const project of projects) {
         if (options.project && project.name !== options.project) continue;
 
         const stats = await acp.getStats(project.id);
+        allChunks += stats.totalChunks;
+        allEmbeddings += stats.totalEmbeddings;
+        allSessions += stats.totalSessions;
 
-        console.log(chalk.bold.underline(`  ${project.name}`));
-        if (project.path) console.log(chalk.dim(`  ${project.path}`));
-        console.log('');
-        console.log(`  Chunks:      ${chalk.cyan(stats.totalChunks)}`);
-        console.log(`  Embedded:    ${chalk.cyan(stats.totalEmbeddings)}`);
-        console.log(`  Sessions:    ${chalk.cyan(stats.totalSessions)}`);
-        console.log(`  Facts:       ${chalk.cyan(stats.totalFacts)}`);
-        console.log(`  Storage:     ${formatBytes(stats.storageBytes)}`);
+        console.log(`  ${chalk.bold(project.name)}  ${chalk.dim(project.path || '')}`);
+        console.log(`    ${stats.totalSessions} sessions, ${stats.totalChunks} chunks, ${stats.totalEmbeddings} embedded`);
         console.log('');
       }
+
+      // Global stats (storage is shared across all projects)
+      const globalStats = await acp.getStats();
+      console.log(chalk.dim('  ─────────────────────────────'));
+      console.log(`  ${chalk.bold('Total')}:  ${allSessions} sessions, ${allChunks} chunks, ${allEmbeddings} embedded`);
+      console.log(`  ${chalk.bold('DB')}:     ${formatBytes(globalStats.storageBytes)}`);
+      console.log('');
     } finally {
       await acp.close();
     }

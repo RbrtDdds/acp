@@ -263,11 +263,23 @@ export class ACP {
           let cs = await this.claudeReader.readSessionStreaming(encodedPath, sessionId);
           if (!cs) continue;
 
-          if (cs.messages.length > 500) {
-            process.stderr?.write?.(`[ACP] Skipping large session ${sessionId} (${cs.messages.length} msgs)\n`);
-            cs = null as any;
-            continue;
-          }
+          const msgCount = cs.messages.length;
+          const tokenCount = cs.messages.reduce((sum, m) => sum + Math.ceil(m.content.length / 4), 0);
+
+          // Create session record
+          await this.storage.createSession({
+            id: sessionId,
+            projectId: project.id,
+            source: 'claude-cli',
+            createdAt: cs.messages[0]?.timestamp || Date.now(),
+            lastAccessed: cs.messages[msgCount - 1]?.timestamp || Date.now(),
+            tier: 'hot',
+            messageCount: msgCount,
+            tokenCount,
+            compressedTokenCount: 0,
+            tags: [],
+            pinned: false,
+          });
 
           const chunks = await chunkStore.storeSession(project.id, sessionId, cs.messages);
 
