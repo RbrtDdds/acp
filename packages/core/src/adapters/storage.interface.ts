@@ -2,7 +2,7 @@ import type { Project, Session, SemanticFact, Relation, Message } from '../model
 
 /**
  * Storage adapter interface — all storage backends implement this.
- * Local (SQLite), Cloud (Supabase), Self-hosted (PostgreSQL).
+ * Implementations: SQLiteAdapter (sql.js WASM), NativeSQLiteAdapter (better-sqlite3).
  */
 export interface StorageAdapter {
   // === Lifecycle ===
@@ -59,6 +59,20 @@ export interface StorageAdapter {
   saveEmbedding(factId: string, embedding: Float32Array): Promise<void>;
   getEmbedding(factId: string): Promise<Float32Array | null>;
   getAllEmbeddings(projectId?: string): Promise<Array<{ factId: string; embedding: Float32Array }>>;
+  /** Iterate fact embeddings in batches to avoid loading all into RAM. */
+  iterateEmbeddings(projectId: string | undefined, batchSize: number, callback: (batch: Array<{ factId: string; embedding: Float32Array }>) => void): Promise<void>;
+
+  // === Chunks (RAG) ===
+  saveChunk(chunk: { id: string; sessionId: string; projectId: string; content: string; tokenCount: number; chunkIndex: number; createdAt: number }): Promise<void>;
+  saveChunkEmbedding(chunkId: string, embedding: Float32Array): Promise<void>;
+  getAllChunkEmbeddings(projectId?: string): Promise<Array<{ chunkId: string; embedding: Float32Array }>>;
+  /** Iterate chunk embeddings in batches to avoid loading all into RAM. */
+  iterateChunkEmbeddings(projectId: string | undefined, batchSize: number, callback: (batch: Array<{ chunkId: string; embedding: Float32Array }>) => void): Promise<void>;
+  getChunk(id: string): Promise<{ id: string; sessionId: string; projectId: string; content: string; tokenCount: number; chunkIndex: number; createdAt: number } | null>;
+  getChunksByIds(ids: string[]): Promise<Array<{ id: string; sessionId: string; projectId: string; content: string; tokenCount: number; chunkIndex: number; createdAt: number }>>;
+  deleteChunksBySession(sessionId: string): Promise<void>;
+  getChunkCount(projectId?: string): Promise<number>;
+  getUnembeddedChunks(projectId?: string, limit?: number): Promise<Array<{ id: string; content: string }>>;
 
   // === Relations ===
   createRelation(relation: Relation): Promise<void>;
@@ -72,6 +86,8 @@ export interface StorageAdapter {
     totalSessions: number;
     totalFacts: number;
     totalMessages: number;
+    totalChunks: number;
+    totalEmbeddings: number;
     storageBytes: number;
     sessionsByTier: Record<string, number>;
     factsByType: Record<string, number>;

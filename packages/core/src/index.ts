@@ -27,6 +27,7 @@ export type {
 // === Adapters ===
 export type { StorageAdapter } from './adapters/storage.interface.js';
 export { SQLiteAdapter } from './adapters/sqlite.adapter.js';
+export { NativeSQLiteAdapter } from './adapters/native-sqlite.adapter.js';
 
 // === Engines ===
 export { FactExtractor } from './engine/fact-extractor.js';
@@ -36,3 +37,4 @@ export { CompactionEngine } from './engine/compaction.js';
 export type { CompactionResult, CompactionConfig } from './engine/compaction.js';
 export { ClaudeCodeReader } from './engine/claude-reader.js';
 export type { ClaudeSession } from './engine/claude-reader.js';
+export { ChunkStore } from './engine/chunk-store.js';

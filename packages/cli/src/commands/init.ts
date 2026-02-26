@@ -1,11 +1,14 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import inquirer from 'inquirer';
+import { createRequire } from 'module';
 import { configExists, saveConfig, getDefaultConfig, getACPDir } from '../utils/config.js';
 
 export const initCommand = new Command('init')
   .description('Initialize ACP — choose storage and configure')
   .action(async () => {
+    const require = createRequire(import.meta.url);
+
     console.log(chalk.bold('\n🧠 Welcome to ACP — AI Context Protocol\n'));
 
     if (configExists()) {
@@ -25,61 +28,40 @@ export const initCommand = new Command('init')
     const { storage } = await inquirer.prompt([{
       type: 'list',
       name: 'storage',
-      message: 'Where do you want to store your memory?',
+      message: 'SQLite engine:',
       choices: [
         {
-          name: `${chalk.green('Local')} (SQLite ~/.acp/acp.db) — Free, private, single device`,
-          value: 'local',
+          name: `${chalk.green('WASM')} (sql.js) — zero native deps, works everywhere`,
+          value: 'sqlite-wasm',
         },
         {
-          name: `${chalk.blue('Cloud')} (Supabase) — Sync across devices, share with team`,
-          value: 'cloud',
-        },
-        {
-          name: `${chalk.magenta('Self-hosted')} (PostgreSQL + pgvector) — Full control`,
-          value: 'self-hosted',
+          name: `${chalk.blue('Native')} (better-sqlite3) — faster, lower memory, needs native build`,
+          value: 'sqlite-native',
         },
       ],
     }]);
 
+    // Check native dep availability
+    if (storage === 'sqlite-native') {
+      try {
+        require.resolve('better-sqlite3');
+      } catch {
+        console.log(chalk.yellow('\n⚠  better-sqlite3 not found. Install it:\n'));
+        console.log(`   ${chalk.cyan('npm install better-sqlite3')}\n`);
+        const { proceed } = await inquirer.prompt([{
+          type: 'confirm',
+          name: 'proceed',
+          message: 'Continue anyway? (you can install it later)',
+          default: true,
+        }]);
+        if (!proceed) {
+          console.log(chalk.yellow('Aborted.'));
+          return;
+        }
+      }
+    }
+
     const config = getDefaultConfig(storage);
-
-    // Cloud config
-    if (storage === 'cloud') {
-      const cloudAnswers = await inquirer.prompt([
-        {
-          type: 'input',
-          name: 'url',
-          message: 'Supabase URL:',
-          validate: (v: string) => v.startsWith('https://') || 'Must be a valid https:// URL',
-        },
-        {
-          type: 'input',
-          name: 'anonKey',
-          message: 'Supabase anon key:',
-          validate: (v: string) => v.length > 10 || 'Invalid key',
-        },
-      ]);
-      config.cloud = {
-        provider: 'supabase',
-        url: cloudAnswers.url,
-        anonKey: cloudAnswers.anonKey,
-      };
-    }
-
-    // Self-hosted config
-    if (storage === 'self-hosted') {
-      const { connectionString } = await inquirer.prompt([{
-        type: 'input',
-        name: 'connectionString',
-        message: 'PostgreSQL connection string:',
-        validate: (v: string) => v.startsWith('postgresql://') || 'Must be a valid postgresql:// connection string',
-      }]);
-      config.selfHosted = {
-        connectionString,
-        pgvector: true,
-      };
-    }
 
     // Embedding engine
     const { embeddings } = await inquirer.prompt([{

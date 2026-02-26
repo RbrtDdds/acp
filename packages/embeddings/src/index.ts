@@ -25,9 +25,6 @@ const DEFAULT_MODEL = 'Xenova/all-MiniLM-L6-v2';
 const DEFAULT_DIMENSIONS = 384;
 const DEFAULT_CACHE_DIR = join(homedir(), '.acp', 'models');
 
-/** Maximum batch size to avoid OOM */
-const MAX_BATCH_SIZE = 64;
-
 export interface LocalEmbeddingOptions {
   /** HuggingFace model ID (must have ONNX weights) */
   model?: string;
@@ -68,6 +65,7 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
 
     this.extractor = await pipeline('feature-extraction', this.model, {
       quantized: this.quantized,
+      dtype: 'q8', // 8-bit quantized — ~4x less RAM than fp32
     });
   }
 
@@ -84,12 +82,19 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
       normalize: true,
     });
 
-    // output.data is a Float32Array (or nested tensor)
-    return this.extractFloat32Array(output);
+    const embedding = this.extractFloat32Array(output);
+
+    // Dispose tensor to free ONNX memory
+    if (typeof output?.dispose === 'function') {
+      output.dispose();
+    }
+
+    return embedding;
   }
 
   /**
-   * Embed multiple texts in batch.
+   * Embed multiple texts sequentially.
+   * Processes one at a time and disposes tensors to prevent memory leaks.
    */
   async embedBatch(texts: string[]): Promise<Float32Array[]> {
     if (!this.extractor) {
@@ -98,20 +103,19 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
 
     const results: Float32Array[] = [];
 
-    // Process in chunks to avoid OOM
-    for (let i = 0; i < texts.length; i += MAX_BATCH_SIZE) {
-      const batch = texts.slice(i, i + MAX_BATCH_SIZE);
-      const output = await this.extractor(batch, {
+    for (const text of texts) {
+      const output = await this.extractor(text, {
         pooling: 'mean',
         normalize: true,
       });
 
-      // For batch input, output is a 2D tensor [batch_size, dimensions]
-      const data = output.data as Float32Array;
-      for (let j = 0; j < batch.length; j++) {
-        const start = j * this.dimensions;
-        const end = start + this.dimensions;
-        results.push(new Float32Array(data.slice(start, end)));
+      // Copy the data out immediately
+      const embedding = this.extractFloat32Array(output);
+      results.push(embedding);
+
+      // Dispose tensor to free ONNX memory
+      if (typeof output?.dispose === 'function') {
+        output.dispose();
       }
     }
 

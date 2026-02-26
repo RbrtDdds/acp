@@ -41,9 +41,9 @@ export type MemoryTier = z.infer<typeof MemoryTier>;
 // === Storage Provider ===
 
 export const StorageProvider = z.enum([
-  'local',       // SQLite ~/.acp/acp.db
-  'cloud',       // Supabase
-  'self-hosted', // vlastný PostgreSQL
+  'local',          // Alias for sqlite-wasm (backward compat)
+  'sqlite-wasm',    // sql.js WASM — zero native deps, works everywhere
+  'sqlite-native',  // better-sqlite3 — faster, direct file I/O, needs native build
 ]);
 
 export type StorageProvider = z.infer<typeof StorageProvider>;
@@ -132,16 +132,6 @@ export type Relation = z.infer<typeof RelationSchema>;
 export const ACPConfigSchema = z.object({
   storage: StorageProvider.default('local'),
   storagePath: z.string().default('~/.acp/acp.db'),
-  cloud: z.object({
-    provider: z.string(),
-    url: z.string(),
-    anonKey: z.string(),
-    userId: z.string().optional(),
-  }).optional(),
-  selfHosted: z.object({
-    connectionString: z.string(),
-    pgvector: z.boolean().default(true),
-  }).optional(),
   compaction: z.object({
     hotTTL: z.string().default('24h'),
     warmTTL: z.string().default('30d'),
@@ -149,10 +139,12 @@ export const ACPConfigSchema = z.object({
     maxTotalSize: z.string().default('50MB'),
   }).default({}),
   embedding: z.object({
-    engine: z.enum(['local', 'cloud', 'none']).default('local'),
+    engine: z.enum(['local', 'none']).default('local'),
     model: z.string().default('Xenova/all-MiniLM-L6-v2'),
     dimensions: z.number().default(384),
   }).default({}),
+  /** Max sessions to store per project for RAG chunks. Older sessions are pruned. Default: 5. */
+  maxSessions: z.number().min(1).max(50).default(5),
   projects: z.array(z.object({
     id: z.string().uuid(),
     name: z.string(),

@@ -1,6 +1,7 @@
 import { v4 as uuid } from 'uuid';
 import { createHash } from 'crypto';
 import { SQLiteAdapter } from './adapters/sqlite.adapter.js';
+import { NativeSQLiteAdapter } from './adapters/native-sqlite.adapter.js';
 import { FactExtractor } from './engine/fact-extractor.js';
 import { RecallEngine, type EmbeddingProvider, type RecallOptions, type RecallResult } from './engine/recall.js';
 import { CompactionEngine } from './engine/compaction.js';
@@ -10,12 +11,9 @@ import type { ACPConfig, Project, Session, SemanticFact, Message } from './model
 
 /** Constants */
 const SIMILARITY_THRESHOLD = 0.8;
-const HIGH_CONFIDENCE_THRESHOLD = 0.85;
-const SEMANTIC_MIN_THRESHOLD = 0.3;
 const DEFAULT_MAX_TOKENS = 800;
-const MCP_MAX_TOKENS = 1200;
-const TOKENS_PER_FACT_ESTIMATE = 50;
 const MANUAL_SESSION_ID = 'manual';
+const DEFAULT_MAX_SESSIONS = 5;
 
 /**
  * ACP — AI Context Protocol
@@ -55,8 +53,7 @@ export class ACP {
         dimensions: config.embedding?.dimensions || 384,
       },
       projects: config.projects || [],
-      cloud: config.cloud,
-      selfHosted: config.selfHosted,
+      maxSessions: config.maxSessions || DEFAULT_MAX_SESSIONS,
     };
 
     // Initialize storage adapter based on config
@@ -199,6 +196,18 @@ export class ACP {
       await this.storage.updateSession({ id: session.id, compressedTokenCount: compressedTokens });
     });
 
+    // Store conversation chunks for RAG (text only, no embedding here)
+    // Wrap in transaction to avoid repeated db.export() per chunk
+    try {
+      const chunkStore = this.recallEngine.getChunkStore();
+      await this.storage.withTransaction(async () => {
+        await chunkStore.storeSession(projectId, session.id, messages);
+      });
+    } catch (err) {
+      // Non-fatal — chunks are a bonus, facts still work
+      console.error(`[ACP] Chunk storage failed: ${err}`);
+    }
+
     return { session, facts };
   }
 
@@ -223,8 +232,9 @@ export class ACP {
    */
   async importClaudeSessions(
     projectPath: string,
-    projectName?: string
-  ): Promise<{ project: Project; imported: number; facts: number }> {
+    projectName?: string,
+    overrideMaxSessions?: number
+  ): Promise<{ project: Project; imported: number; facts: number; embedded: number }> {
     const encodedPath = this.claudeReader.findProject(projectPath);
     if (!encodedPath) {
       throw new Error(`No Claude Code sessions found for path: ${projectPath}`);
@@ -235,15 +245,64 @@ export class ACP {
       projectPath
     );
 
-    const claudeSessions = this.claudeReader.readAllSessions(encodedPath);
-    let totalFacts = 0;
+    const maxSessions = overrideMaxSessions || this.config.maxSessions || DEFAULT_MAX_SESSIONS;
+    const sessionIds = this.claudeReader.listSessions(encodedPath);
 
-    for (const cs of claudeSessions) {
-      const { facts } = await this.ingestClaudeSession(project.id, cs);
-      totalFacts += facts.length;
+    let totalChunks = 0;
+    let imported = 0;
+
+    const chunkStore = this.recallEngine.getChunkStore();
+    let totalEmbedded = 0;
+
+    // Phase 1: Store text chunks in a single transaction
+    await this.storage.withTransaction(async () => {
+      for (const sessionId of sessionIds) {
+        if (imported >= maxSessions) break;
+
+        try {
+          let cs = await this.claudeReader.readSessionStreaming(encodedPath, sessionId);
+          if (!cs) continue;
+
+          if (cs.messages.length > 500) {
+            process.stderr?.write?.(`[ACP] Skipping large session ${sessionId} (${cs.messages.length} msgs)\n`);
+            cs = null as any;
+            continue;
+          }
+
+          const chunks = await chunkStore.storeSession(project.id, sessionId, cs.messages);
+
+          // Release session data — SlicedString refs may keep JSON strings alive
+          cs = null as any;
+
+          totalChunks += chunks;
+          imported++;
+        } catch (err) {
+          process.stderr?.write?.(`[ACP] Failed session ${sessionId}: ${err}\n`);
+        }
+      }
+    });
+
+    // Phase 2: Embed chunks inline (if embedder is available)
+    // Runs after transaction so all chunks are persisted first.
+    if (this.embedder) {
+      const BATCH_SIZE = 50;
+      while (true) {
+        const batch = await this.storage.getUnembeddedChunks(project.id, BATCH_SIZE);
+        if (batch.length === 0) break;
+
+        for (const chunk of batch) {
+          try {
+            const embedding = await this.embedder.embed(chunk.content);
+            await this.storage.saveChunkEmbedding(chunk.id, embedding);
+            totalEmbedded++;
+          } catch (err) {
+            process.stderr?.write?.(`[ACP] Embed failed chunk ${chunk.id}: ${err}\n`);
+          }
+        }
+      }
     }
 
-    return { project, imported: claudeSessions.length, facts: totalFacts };
+    return { project, imported, facts: totalChunks, embedded: totalEmbedded };
   }
 
   // === Recall ===
@@ -430,13 +489,10 @@ export class ACP {
   private createAdapter(): StorageAdapter {
     switch (this.config.storage) {
       case 'local':
+      case 'sqlite-wasm':
         return new SQLiteAdapter(this.config.storagePath);
-      case 'cloud':
-        // TODO: implement SupabaseAdapter
-        throw new Error('Cloud storage not yet implemented. Use "local" or "self-hosted".');
-      case 'self-hosted':
-        // TODO: implement PostgresAdapter
-        throw new Error('Self-hosted storage not yet implemented. Use "local".');
+      case 'sqlite-native':
+        return new NativeSQLiteAdapter(this.config.storagePath);
       default:
         return new SQLiteAdapter(this.config.storagePath);
     }

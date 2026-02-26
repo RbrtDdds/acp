@@ -224,19 +224,22 @@ async function autoImportLatest(
   const existingSessions = await acp.listSessions(project.id);
   const existingIds = new Set(existingSessions.map((s: any) => s.id));
 
-  // Get all Claude sessions
-  const claudeSessions = reader.readAllSessions(encodedPath);
+  // List session IDs without reading content (cheap — just readdir)
+  const sessionIds = reader.listSessions(encodedPath);
 
-  // Find new sessions (not yet imported)
+  // Stream only new sessions one at a time instead of loading all into RAM
   let imported = 0;
   let facts = 0;
+  const oneHourAgo = Date.now() - 60 * 60 * 1000;
 
-  for (const cs of claudeSessions) {
-    // Simple heuristic: if we already have a session with similar timestamp, skip
-    if (existingIds.has(cs.id)) continue;
+  for (const sessionId of sessionIds) {
+    if (existingIds.has(sessionId)) continue;
+
+    // Read one session at a time via streaming reader
+    const cs = await reader.readSessionStreaming(encodedPath, sessionId);
+    if (!cs) continue;
 
     // Only import recent sessions (last hour) to avoid re-importing everything
-    const oneHourAgo = Date.now() - 60 * 60 * 1000;
     if (cs.endedAt < oneHourAgo) continue;
 
     const result = await acp.ingestClaudeSession(project.id, cs);

@@ -41,6 +41,14 @@
     "ora": "^8.2.0",
     "inquirer": "^12.4.0"
   },
+  "peerDependencies": {
+    "better-sqlite3": ">=9.0.0"
+  },
+  "peerDependenciesMeta": {
+    "better-sqlite3": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "tsup": "^8.4.0",
     "typescript": "^5.7.0",

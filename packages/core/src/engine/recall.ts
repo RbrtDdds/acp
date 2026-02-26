@@ -1,5 +1,6 @@
 import type { SemanticFact } from '../models/schemas.js';
 import type { StorageAdapter } from '../adapters/storage.interface.js';
+import { ChunkStore } from './chunk-store.js';
 
 /** Recall engine constants */
 const HIGH_CONFIDENCE_THRESHOLD = 0.85;
@@ -50,10 +51,16 @@ export interface ScoredFact {
 export class RecallEngine {
   private storage: StorageAdapter;
   private embedder: EmbeddingProvider | null;
+  private chunkStore: ChunkStore;
 
   constructor(storage: StorageAdapter, embedder?: EmbeddingProvider) {
     this.storage = storage;
     this.embedder = embedder || null;
+    this.chunkStore = new ChunkStore(storage, embedder || undefined);
+  }
+
+  getChunkStore(): ChunkStore {
+    return this.chunkStore;
   }
 
   /**
@@ -72,60 +79,76 @@ export class RecallEngine {
       format = 'system-prompt',
     } = options;
 
-    // Get all candidate facts
+    // === Primary: Chunk-based RAG search (if embeddings available) ===
+    const chunkResults = this.embedder
+      ? await this.chunkStore.search(query, {
+          projectId: projectId || undefined,
+          maxResults,
+          maxTokens: Math.floor(maxTokens * 0.7), // reserve 30% for facts
+        })
+      : [];
+
+    // === Secondary: Fact-based search (keyword/semantic/hybrid) ===
     const facts = await this.storage.listFacts({
       projectId: projectId || undefined,
       minConfidence,
       status: 'active',
     });
 
-    // Filter by type if specified
     const filtered = factTypes
       ? facts.filter((f) => factTypes.includes(f.type))
       : facts;
 
     let scored: ScoredFact[] = [];
 
-    if (method === 'keyword' || (method === 'hybrid' && !this.embedder)) {
-      scored = this.keywordSearch(query, filtered);
-    } else if (method === 'semantic' && this.embedder) {
-      scored = await this.semanticSearch(query, filtered, projectId);
-    } else if (method === 'hybrid' && this.embedder) {
-      const keywordResults = this.keywordSearch(query, filtered);
-      const semanticResults = await this.semanticSearch(query, filtered, projectId);
-      scored = this.mergeResults(keywordResults, semanticResults, weights);
-    }
+    // Use remaining token budget for facts
+    const chunkTokensUsed = chunkResults.reduce((sum, c) => sum + Math.ceil(c.content.length / 4), 0);
+    const factTokenBudget = maxTokens - chunkTokensUsed;
 
-    // Sort by score, limit results
-    scored.sort((a, b) => b.score - a.score);
-    scored = scored.slice(0, maxResults);
+    if (filtered.length > 0 && factTokenBudget > 50) {
+      if (method === 'keyword' || (method === 'hybrid' && !this.embedder)) {
+        scored = this.keywordSearch(query, filtered);
+      } else if (method === 'semantic' && this.embedder) {
+        scored = await this.semanticSearch(query, filtered, projectId);
+      } else if (method === 'hybrid' && this.embedder) {
+        const keywordResults = this.keywordSearch(query, filtered);
+        const semanticResults = await this.semanticSearch(query, filtered, projectId);
+        scored = this.mergeResults(keywordResults, semanticResults, weights);
+      }
 
-    // Trim to token budget
-    scored = this.trimToTokenBudget(scored, maxTokens);
+      scored.sort((a, b) => b.score - a.score);
+      scored = scored.slice(0, maxResults);
+      scored = this.trimToTokenBudget(scored, factTokenBudget);
 
-    // Update lastUsed and useCount for returned facts
-    for (const sf of scored) {
-      await this.storage.updateFact({
-        id: sf.fact.id,
-        lastUsed: Date.now(),
-        useCount: sf.fact.useCount + 1,
-      });
+      // Update lastUsed and useCount for returned facts
+      for (const sf of scored) {
+        await this.storage.updateFact({
+          id: sf.fact.id,
+          lastUsed: Date.now(),
+          useCount: sf.fact.useCount + 1,
+        });
+      }
     }
 
     // Determine suggestion type
-    const suggestion = this.determineSuggestion(scored, projectId);
+    const suggestion = chunkResults.length > 0
+      ? 'REFERENCE_PREVIOUS_WORK'
+      : this.determineSuggestion(scored, projectId);
 
     // Collect unique session and project IDs
-    const sessionIds = [...new Set(scored.map((sf) => sf.fact.sessionId))];
+    const sessionIds = [...new Set([
+      ...scored.map((sf) => sf.fact.sessionId),
+      ...chunkResults.map((c) => c.sessionId),
+    ])];
     const projectIds = [...new Set(scored.map((sf) => sf.fact.projectId))];
 
-    // Format output
-    const text = this.formatOutput(scored, format, projectId);
+    // Format output — chunks + facts combined
+    const text = this.formatCombinedOutput(chunkResults, scored, format, projectId);
 
     return {
       facts: scored,
       text,
-      tokenEstimate: Math.ceil(text.length / 4), // rough estimate
+      tokenEstimate: Math.ceil(text.length / 4),
       sessionIds,
       projectIds,
       suggestion,
@@ -159,24 +182,26 @@ export class RecallEngine {
     if (!this.embedder) return [];
 
     const queryEmbedding = await this.embedder.embed(query);
-    const allEmbeddings = await this.storage.getAllEmbeddings(projectId);
 
     // Map fact IDs for quick lookup
     const factMap = new Map(facts.map((f) => [f.id, f]));
 
-    return allEmbeddings
-      .filter((e) => factMap.has(e.factId))
-      .map((e) => {
-        const fact = factMap.get(e.factId)!;
-        const score = this.cosineSimilarity(queryEmbedding, e.embedding) * fact.confidence;
+    // Score in batches to avoid loading all embeddings into RAM at once
+    const results: ScoredFact[] = [];
 
-        return {
-          fact,
-          score,
-          matchType: 'semantic' as const,
-        };
-      })
-      .filter((sf) => sf.score > SEMANTIC_MIN_THRESHOLD); // minimum semantic threshold
+    await this.storage.iterateEmbeddings(projectId, 500, (batch) => {
+      for (const e of batch) {
+        const fact = factMap.get(e.factId);
+        if (!fact) continue;
+
+        const score = this.cosineSimilarity(queryEmbedding, e.embedding) * fact.confidence;
+        if (score > SEMANTIC_MIN_THRESHOLD) {
+          results.push({ fact, score, matchType: 'semantic' as const });
+        }
+      }
+    });
+
+    return results;
   }
 
   // === Merge Results ===
@@ -271,6 +296,57 @@ export class RecallEngine {
   }
 
   // === Formatting ===
+
+  private formatCombinedOutput(
+    chunks: Array<{ content: string; score: number; sessionId: string }>,
+    facts: ScoredFact[],
+    format: RecallOptions['format'],
+    currentProjectId?: string
+  ): string {
+    if (chunks.length === 0 && facts.length === 0) return '';
+
+    if (format === 'raw') {
+      const chunkLines = chunks.map((c) => c.content);
+      const factLines = facts.map((sf) => `[${sf.fact.type}] ${sf.fact.content}`);
+      return [...chunkLines, ...factLines].join('\n---\n');
+    }
+
+    if (format === 'structured') {
+      return JSON.stringify({ chunks, facts: facts.map((sf) => ({
+        type: sf.fact.type, content: sf.fact.content, score: sf.score,
+      })) }, null, 2);
+    }
+
+    // format === 'system-prompt'
+    const lines: string[] = [];
+
+    if (chunks.length > 0) {
+      lines.push('[ACP CONVERSATION HISTORY — relevant excerpts from previous sessions]');
+      for (const chunk of chunks) {
+        lines.push(`  ---`);
+        // Indent chunk content
+        const indented = chunk.content.split('\n').map(l => `  ${l}`).join('\n');
+        lines.push(indented);
+      }
+      lines.push('');
+    }
+
+    // Include facts if any
+    if (facts.length > 0) {
+      lines.push('[ACP FACTS]');
+      for (const sf of facts) {
+        lines.push(`  - [${sf.fact.type}] ${sf.fact.content}`);
+      }
+      lines.push('');
+    }
+
+    lines.push('[ACP INSTRUCTIONS]');
+    lines.push('  You have access to the user\'s project history via ACP.');
+    lines.push('  When referencing previous work, mention it naturally.');
+    lines.push('  Use context silently — don\'t mention ACP unless asked.');
+
+    return lines.join('\n');
+  }
 
   private formatOutput(
     facts: ScoredFact[],

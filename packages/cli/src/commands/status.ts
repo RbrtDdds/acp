@@ -6,7 +6,7 @@ export const statusCommand = new Command('status')
   .description('Show ACP status and statistics')
   .option('-p, --project <name>', 'Show stats for specific project')
   .action(async (options) => {
-    const acp = await createACP();
+    const acp = await createACP({ skipEmbedding: true });
 
     try {
       const projects = await acp.listProjects();
@@ -22,34 +22,24 @@ export const statusCommand = new Command('status')
         if (options.project && project.name !== options.project) continue;
 
         const stats = await acp.getStats(project.id);
-        const compactionStatus = await acp.getCompactionStatus(project.id);
 
         console.log(chalk.bold.underline(`  ${project.name}`));
         if (project.path) console.log(chalk.dim(`  ${project.path}`));
         console.log('');
-        console.log(`  Sessions:  ${chalk.cyan(stats.totalSessions)}`);
-        console.log(`    hot:     ${chalk.red(compactionStatus.hot)}`);
-        console.log(`    warm:    ${chalk.yellow(compactionStatus.warm)}`);
-        console.log(`    cold:    ${chalk.blue(compactionStatus.cold)}`);
-        console.log(`  Facts:     ${chalk.cyan(stats.totalFacts)}`);
-
-        if (Object.keys(stats.factsByType).length > 0) {
-          for (const [type, count] of Object.entries(stats.factsByType)) {
-            console.log(`    ${type}: ${count}`);
-          }
-        }
-
-        console.log(`  Storage:   ${compactionStatus.totalSize} / ${compactionStatus.maxSize} (${compactionStatus.usage})`);
-
-        // Estimate tokens saved
-        const TOKENS_PER_FACT = 50;
-        const COST_PER_MILLION_TOKENS = 3;
-        const tokensSaved = stats.totalFacts * TOKENS_PER_FACT;
-        const costSaved = (tokensSaved / 1_000_000) * COST_PER_MILLION_TOKENS;
-        console.log(`  Tokens saved: ~${chalk.green(tokensSaved.toLocaleString())} (~$${costSaved.toFixed(2)})`);
+        console.log(`  Chunks:      ${chalk.cyan(stats.totalChunks)}`);
+        console.log(`  Embedded:    ${chalk.cyan(stats.totalEmbeddings)}`);
+        console.log(`  Sessions:    ${chalk.cyan(stats.totalSessions)}`);
+        console.log(`  Facts:       ${chalk.cyan(stats.totalFacts)}`);
+        console.log(`  Storage:     ${formatBytes(stats.storageBytes)}`);
         console.log('');
       }
     } finally {
       await acp.close();
     }
   });
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}

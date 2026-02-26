@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { Command } from 'commander';
 import { initCommand } from './commands/init.js';
 import { statusCommand } from './commands/status.js';
@@ -9,6 +10,7 @@ import { exportCommand } from './commands/export.js';
 import { compactCommand } from './commands/compact.js';
 import { claudeCommand } from './commands/claude.js';
 import { setupCommand } from './commands/setup.js';
+import { embedCommand } from './commands/embed.js';
 
 const program = new Command();
 
@@ -27,5 +29,6 @@ program.addCommand(exportCommand);
 program.addCommand(compactCommand);
 program.addCommand(claudeCommand);
 program.addCommand(setupCommand);
+program.addCommand(embedCommand);
 
 program.parse();

@@ -35,7 +35,7 @@ export function saveConfig(config: ACPConfig): void {
   try { chmodSync(CONFIG_PATH, 0o600); } catch { /* ignore on Windows */ }
 }
 
-export function getDefaultConfig(storage: 'local' | 'cloud' | 'self-hosted' = 'local'): ACPConfig {
+export function getDefaultConfig(storage: 'local' | 'sqlite-wasm' | 'sqlite-native' = 'local'): ACPConfig {
   return {
     storage,
     storagePath: join(ACP_DIR, 'acp.db'),
@@ -50,6 +50,7 @@ export function getDefaultConfig(storage: 'local' | 'cloud' | 'self-hosted' = 'l
       model: 'Xenova/all-MiniLM-L6-v2',
       dimensions: 384,
     },
+    maxSessions: 5,
     projects: [],
   };
 }

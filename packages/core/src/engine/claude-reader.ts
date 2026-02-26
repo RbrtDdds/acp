@@ -1,6 +1,7 @@
-import { readFileSync, readdirSync, existsSync } from 'fs';
+import { readFileSync, readdirSync, existsSync, statSync, createReadStream } from 'fs';
 import { join, basename } from 'path';
 import { homedir } from 'os';
+import { createInterface } from 'readline';
 import type { Message } from '../models/schemas.js';
 
 /**
@@ -37,11 +38,11 @@ export class ClaudeCodeReader {
   /**
    * List all Claude Code projects with sessions.
    */
-  listProjects(): Array<{ encodedPath: string; decodedPath: string; sessionCount: number }> {
+  listProjects(): Array<{ encodedPath: string; decodedPath: string; sessionCount: number; lastActivity: number }> {
     const projectsDir = join(this.claudeDir, 'projects');
     if (!existsSync(projectsDir)) return [];
 
-    const projects: Array<{ encodedPath: string; decodedPath: string; sessionCount: number }> = [];
+    const projects: Array<{ encodedPath: string; decodedPath: string; sessionCount: number; lastActivity: number }> = [];
 
     for (const entry of readdirSync(projectsDir, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
@@ -53,14 +54,25 @@ export class ClaudeCodeReader {
 
       if (sessionFiles.length === 0) continue;
 
+      // Get last activity from most recently modified session file
+      let lastActivity = 0;
+      for (const sf of sessionFiles) {
+        try {
+          const mtime = statSync(join(projectDir, sf)).mtimeMs;
+          if (mtime > lastActivity) lastActivity = mtime;
+        } catch { /* skip */ }
+      }
+
       projects.push({
         encodedPath: entry.name,
         decodedPath: this.decodePath(entry.name),
         sessionCount: sessionFiles.length,
+        lastActivity,
       });
     }
 
-    return projects;
+    // Sort by last activity (most recent first)
+    return projects.sort((a, b) => b.lastActivity - a.lastActivity);
   }
 
   /**
@@ -77,6 +89,7 @@ export class ClaudeCodeReader {
 
   /**
    * Read and parse a specific Claude Code session.
+   * Synchronous version — reads file line-by-line but keeps it simple.
    */
   readSession(encodedProjectPath: string, sessionId: string): ClaudeSession | null {
     const filePath = join(
@@ -85,31 +98,130 @@ export class ClaudeCodeReader {
 
     if (!existsSync(filePath)) return null;
 
+    const fileSize = statSync(filePath).size;
+    if (fileSize > 10 * 1024 * 1024) {
+      process.stderr?.write?.(`[ACP] Skipping oversized session (${(fileSize / 1024 / 1024).toFixed(1)}MB): ${sessionId}\n`);
+      return null;
+    }
+
     const content = readFileSync(filePath, 'utf-8');
-    const lines = content.split('\n').filter((line: string) => line.trim());
 
     const messages: Message[] = [];
     let startedAt = Date.now();
     let endedAt = 0;
     let estimatedTokens = 0;
 
-    for (const line of lines) {
+    // Parse line by line without creating a full split array
+    let lineStart = 0;
+    while (lineStart < content.length) {
+      let lineEnd = content.indexOf('\n', lineStart);
+      if (lineEnd === -1) lineEnd = content.length;
+
+      const lineLen = lineEnd - lineStart;
+
+      // Skip empty lines and huge lines (tool output with base64, full file dumps)
+      if (lineLen > 5 && lineLen < 50_000) {
+        try {
+          const record = JSON.parse(content.substring(lineStart, lineEnd));
+          const msg = this.parseRecord(record);
+          if (msg) {
+            // Truncate huge message content (tool results can be massive)
+            // CRITICAL: Use flattenString to break V8 SlicedString reference
+            // to the original JSON-parsed string (can be 100KB+ per line)
+            if (msg.content.length > 5000) {
+              msg.content = this.flattenString(msg.content.slice(0, 5000));
+            }
+            messages.push(msg);
+            estimatedTokens += Math.ceil(msg.content.length / 4);
+
+            if (msg.timestamp < startedAt) startedAt = msg.timestamp;
+            if (msg.timestamp > endedAt) endedAt = msg.timestamp;
+          }
+        } catch {
+          // Skip malformed lines silently
+        }
+      }
+
+      lineStart = lineEnd + 1;
+    }
+
+    if (messages.length === 0) return null;
+
+    return {
+      id: sessionId,
+      projectPath: this.decodePath(encodedProjectPath),
+      messages,
+      startedAt,
+      endedAt,
+      messageCount: messages.length,
+      estimatedTokens,
+    };
+  }
+
+  /**
+   * Read a session using streaming (async) — for memory-critical import paths.
+   * Processes file line by line without loading it all into memory at once.
+   */
+  async readSessionStreaming(encodedProjectPath: string, sessionId: string): Promise<ClaudeSession | null> {
+    const filePath = join(
+      this.claudeDir, 'projects', encodedProjectPath, `${sessionId}.jsonl`
+    );
+
+    if (!existsSync(filePath)) return null;
+
+    // Check file size and skip huge files
+    const fileSize = statSync(filePath).size;
+    if (fileSize > 10 * 1024 * 1024) {
+      process.stderr?.write?.(`[ACP] Skipping oversized session (${(fileSize / 1024 / 1024).toFixed(1)}MB): ${sessionId}\n`);
+      return null;
+    }
+
+    const messages: Message[] = [];
+    let startedAt = Date.now();
+    let endedAt = 0;
+    let estimatedTokens = 0;
+    let lineCount = 0;
+    let skippedLargeLines = 0;
+
+    const stream = createReadStream(filePath, { encoding: 'utf-8', highWaterMark: 64 * 1024 });
+    const rl = createInterface({
+      input: stream,
+      crlfDelay: Infinity,
+    });
+
+    for await (const line of rl) {
+      lineCount++;
+      // Skip empty lines and huge lines (tool outputs, base64 data)
+      // Cap at 50KB — anything bigger is tool output/base64, not useful conversation
+      if (line.length < 5 || line.length > 50_000) {
+        if (line.length > 50_000) skippedLargeLines++;
+        continue;
+      }
+
       try {
         const record = JSON.parse(line);
         const msg = this.parseRecord(record);
         if (msg) {
+          // CRITICAL: flattenString breaks V8 SlicedString reference to the
+          // full JSON-parsed line. Without this, each "truncated" 5KB string
+          // silently retains the entire 100KB+ original line in memory.
+          if (msg.content.length > 5000) {
+            msg.content = this.flattenString(msg.content.slice(0, 5000));
+          }
           messages.push(msg);
           estimatedTokens += Math.ceil(msg.content.length / 4);
 
           if (msg.timestamp < startedAt) startedAt = msg.timestamp;
           if (msg.timestamp > endedAt) endedAt = msg.timestamp;
         }
-      } catch (err) {
-        // Skip malformed JSONL lines (common with partial writes)
-        process.stderr?.write?.(`[ACP] Skipping malformed JSONL line in ${sessionId}: ${err}\n`);
-        continue;
+      } catch {
+        // Skip malformed lines
       }
     }
+
+    // Explicitly destroy stream to release fd and buffers immediately
+    // (for-await auto-closes readline but fd cleanup may be deferred)
+    stream.destroy();
 
     if (messages.length === 0) return null;
 
@@ -208,7 +320,10 @@ export class ClaudeCodeReader {
           if (typeof block === 'string') return block;
           if (block.type === 'text' && block.text) return block.text;
           if (block.type === 'tool_use') return `[tool: ${block.name}]`;
-          if (block.type === 'tool_result') return `[result: ${typeof block.content === 'string' ? block.content.slice(0, 200) : '...'}]`;
+          if (block.type === 'tool_result') {
+            const preview = typeof block.content === 'string' ? block.content.slice(0, 200) : '...';
+            return `[result: ${preview}]`; // template literal creates new flat string
+          }
           return '';
         })
         .filter(Boolean)
@@ -216,6 +331,18 @@ export class ClaudeCodeReader {
     }
 
     return String(content);
+  }
+
+  /**
+   * Force V8 to create a new flat string, breaking SlicedString references.
+   * V8's .slice() returns a SlicedString — a thin wrapper that keeps the
+   * ENTIRE original string alive in memory. When we truncate 100KB→5KB,
+   * V8 still retains the full 100KB behind the scenes.
+   * Buffer round-trip guarantees a fresh flat string allocation.
+   */
+  private flattenString(s: string): string {
+    if (s.length < 100) return s;
+    return Buffer.from(s, 'utf8').toString('utf8');
   }
 
   /**

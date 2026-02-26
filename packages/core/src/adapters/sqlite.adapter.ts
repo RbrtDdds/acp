@@ -56,6 +56,7 @@ export class SQLiteAdapter implements StorageAdapter {
 
   private save(): void {
     if (this.inTransaction) return; // defer save until transaction ends
+
     const db = this.getDb();
     const data = db.export();
     const buffer = Buffer.from(data);
@@ -170,6 +171,28 @@ export class SQLiteAdapter implements StorageAdapter {
       )
     `);
 
+    db.run(`
+      CREATE TABLE IF NOT EXISTS chunks (
+        id TEXT PRIMARY KEY,
+        sessionId TEXT NOT NULL,
+        projectId TEXT NOT NULL,
+        content TEXT NOT NULL,
+        tokenCount INTEGER NOT NULL,
+        chunkIndex INTEGER NOT NULL,
+        createdAt INTEGER NOT NULL,
+        FOREIGN KEY (sessionId) REFERENCES sessions(id) ON DELETE CASCADE,
+        FOREIGN KEY (projectId) REFERENCES projects(id) ON DELETE CASCADE
+      )
+    `);
+
+    db.run(`
+      CREATE TABLE IF NOT EXISTS chunk_embeddings (
+        chunkId TEXT PRIMARY KEY,
+        embedding BLOB NOT NULL,
+        FOREIGN KEY (chunkId) REFERENCES chunks(id) ON DELETE CASCADE
+      )
+    `);
+
     // Indexes for common queries
     db.run('CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(projectId)');
     db.run('CREATE INDEX IF NOT EXISTS idx_sessions_tier ON sessions(tier)');
@@ -178,6 +201,8 @@ export class SQLiteAdapter implements StorageAdapter {
     db.run('CREATE INDEX IF NOT EXISTS idx_facts_type ON facts(type)');
     db.run('CREATE INDEX IF NOT EXISTS idx_facts_status ON facts(status)');
     db.run('CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(sessionId)');
+    db.run('CREATE INDEX IF NOT EXISTS idx_chunks_project ON chunks(projectId)');
+    db.run('CREATE INDEX IF NOT EXISTS idx_chunks_session ON chunks(sessionId)');
   }
 
   // === Projects ===
@@ -475,7 +500,9 @@ export class SQLiteAdapter implements StorageAdapter {
 
   async saveEmbedding(factId: string, embedding: Float32Array): Promise<void> {
     const db = this.getDb();
-    const buffer = Buffer.from(embedding.buffer);
+    // Use byteOffset + byteLength to handle Float32Array views/subarrays correctly.
+    // Buffer.from(embedding.buffer) would copy the ENTIRE backing ArrayBuffer.
+    const buffer = Buffer.from(embedding.buffer, embedding.byteOffset, embedding.byteLength);
     db.run(
       'INSERT OR REPLACE INTO embeddings (factId, embedding) VALUES (?, ?)',
       [factId, buffer]
@@ -522,6 +549,42 @@ export class SQLiteAdapter implements StorageAdapter {
         });
       }
       return results;
+    } finally {
+      stmt.free();
+    }
+  }
+
+  async iterateEmbeddings(
+    projectId: string | undefined,
+    batchSize: number,
+    callback: (batch: Array<{ factId: string; embedding: Float32Array }>) => void
+  ): Promise<void> {
+    const db = this.getDb();
+    let query = 'SELECT e.factId, e.embedding FROM embeddings e';
+    const params: any[] = [];
+
+    if (projectId) {
+      query += ' JOIN facts f ON e.factId = f.id WHERE f.projectId = ?';
+      params.push(projectId);
+    }
+
+    const stmt = db.prepare(query);
+    try {
+      if (params.length) stmt.bind(params);
+      let batch: Array<{ factId: string; embedding: Float32Array }> = [];
+      while (stmt.step()) {
+        const row = stmt.getAsObject();
+        const blob = row.embedding as Uint8Array;
+        batch.push({
+          factId: row.factId as string,
+          embedding: new Float32Array(blob.buffer, blob.byteOffset, blob.byteLength / 4),
+        });
+        if (batch.length >= batchSize) {
+          callback(batch);
+          batch = [];
+        }
+      }
+      if (batch.length > 0) callback(batch);
     } finally {
       stmt.free();
     }
@@ -584,6 +647,8 @@ export class SQLiteAdapter implements StorageAdapter {
     totalSessions: number;
     totalFacts: number;
     totalMessages: number;
+    totalChunks: number;
+    totalEmbeddings: number;
     storageBytes: number;
     sessionsByTier: Record<string, number>;
     factsByType: Record<string, number>;
@@ -639,11 +704,26 @@ export class SQLiteAdapter implements StorageAdapter {
       typeStmt.free();
     }
 
-    return { totalProjects, totalSessions, totalFacts, totalMessages, storageBytes, sessionsByTier, factsByType };
+    // Chunk + embedding counts
+    const totalChunks = this.queryCount(db, 'chunks', projectId);
+    let totalEmbeddings = 0;
+    if (projectId) {
+      const embStmt = db.prepare('SELECT COUNT(*) as c FROM chunk_embeddings ce JOIN chunks c ON ce.chunkId = c.id WHERE c.projectId = ?');
+      try {
+        embStmt.bind([projectId]);
+        if (embStmt.step()) totalEmbeddings = (embStmt.getAsObject().c as number) || 0;
+      } finally {
+        embStmt.free();
+      }
+    } else {
+      totalEmbeddings = (db.exec('SELECT COUNT(*) as c FROM chunk_embeddings')[0]?.values[0]?.[0] as number) || 0;
+    }
+
+    return { totalProjects, totalSessions, totalFacts, totalMessages, totalChunks, totalEmbeddings, storageBytes, sessionsByTier, factsByType };
   }
 
   /** Count rows in a table with optional project filter (safe from SQL injection — table name is hardcoded). */
-  private queryCount(db: Database, table: 'sessions' | 'facts', projectId?: string): number {
+  private queryCount(db: Database, table: 'sessions' | 'facts' | 'chunks', projectId?: string): number {
     if (projectId) {
       const stmt = db.prepare(`SELECT COUNT(*) as c FROM ${table} WHERE projectId = ?`);
       try {
@@ -655,6 +735,186 @@ export class SQLiteAdapter implements StorageAdapter {
       return 0;
     }
     return (db.exec(`SELECT COUNT(*) as c FROM ${table}`)[0]?.values[0]?.[0] as number) || 0;
+  }
+
+  // === Chunks ===
+
+  async saveChunk(chunk: { id: string; sessionId: string; projectId: string; content: string; tokenCount: number; chunkIndex: number; createdAt: number }): Promise<void> {
+    const db = this.getDb();
+    db.run(
+      'INSERT INTO chunks (id, sessionId, projectId, content, tokenCount, chunkIndex, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [chunk.id, chunk.sessionId, chunk.projectId, chunk.content, chunk.tokenCount, chunk.chunkIndex, chunk.createdAt]
+    );
+    this.save();
+  }
+
+  async saveChunkEmbedding(chunkId: string, embedding: Float32Array): Promise<void> {
+    const db = this.getDb();
+    // Use byteOffset + byteLength to handle Float32Array views/subarrays correctly
+    const buffer = Buffer.from(embedding.buffer, embedding.byteOffset, embedding.byteLength);
+    db.run(
+      'INSERT OR REPLACE INTO chunk_embeddings (chunkId, embedding) VALUES (?, ?)',
+      [chunkId, buffer]
+    );
+    this.save();
+  }
+
+  async getAllChunkEmbeddings(projectId?: string): Promise<Array<{ chunkId: string; embedding: Float32Array }>> {
+    const db = this.getDb();
+    let query = 'SELECT ce.chunkId, ce.embedding FROM chunk_embeddings ce';
+    const params: any[] = [];
+
+    if (projectId) {
+      query += ' JOIN chunks c ON ce.chunkId = c.id WHERE c.projectId = ?';
+      params.push(projectId);
+    }
+
+    const stmt = db.prepare(query);
+    try {
+      if (params.length) stmt.bind(params);
+      const results: Array<{ chunkId: string; embedding: Float32Array }> = [];
+      while (stmt.step()) {
+        const row = stmt.getAsObject();
+        const blob = row.embedding as Uint8Array;
+        results.push({
+          chunkId: row.chunkId as string,
+          embedding: new Float32Array(blob.buffer, blob.byteOffset, blob.byteLength / 4),
+        });
+      }
+      return results;
+    } finally {
+      stmt.free();
+    }
+  }
+
+  async iterateChunkEmbeddings(
+    projectId: string | undefined,
+    batchSize: number,
+    callback: (batch: Array<{ chunkId: string; embedding: Float32Array }>) => void
+  ): Promise<void> {
+    const db = this.getDb();
+    let query = 'SELECT ce.chunkId, ce.embedding FROM chunk_embeddings ce';
+    const params: any[] = [];
+
+    if (projectId) {
+      query += ' JOIN chunks c ON ce.chunkId = c.id WHERE c.projectId = ?';
+      params.push(projectId);
+    }
+
+    const stmt = db.prepare(query);
+    try {
+      if (params.length) stmt.bind(params);
+      let batch: Array<{ chunkId: string; embedding: Float32Array }> = [];
+      while (stmt.step()) {
+        const row = stmt.getAsObject();
+        const blob = row.embedding as Uint8Array;
+        batch.push({
+          chunkId: row.chunkId as string,
+          embedding: new Float32Array(blob.buffer, blob.byteOffset, blob.byteLength / 4),
+        });
+        if (batch.length >= batchSize) {
+          callback(batch);
+          batch = [];
+        }
+      }
+      if (batch.length > 0) callback(batch);
+    } finally {
+      stmt.free();
+    }
+  }
+
+  async getChunk(id: string): Promise<{ id: string; sessionId: string; projectId: string; content: string; tokenCount: number; chunkIndex: number; createdAt: number } | null> {
+    const db = this.getDb();
+    const stmt = db.prepare('SELECT * FROM chunks WHERE id = ?');
+    try {
+      stmt.bind([id]);
+      if (stmt.step()) {
+        const row = stmt.getAsObject();
+        return {
+          id: row.id as string,
+          sessionId: row.sessionId as string,
+          projectId: row.projectId as string,
+          content: row.content as string,
+          tokenCount: row.tokenCount as number,
+          chunkIndex: row.chunkIndex as number,
+          createdAt: row.createdAt as number,
+        };
+      }
+      return null;
+    } finally {
+      stmt.free();
+    }
+  }
+
+  async getChunksByIds(ids: string[]): Promise<Array<{ id: string; sessionId: string; projectId: string; content: string; tokenCount: number; chunkIndex: number; createdAt: number }>> {
+    if (ids.length === 0) return [];
+    const db = this.getDb();
+    const placeholders = ids.map(() => '?').join(',');
+    const stmt = db.prepare(`SELECT * FROM chunks WHERE id IN (${placeholders}) ORDER BY createdAt DESC, chunkIndex ASC`);
+    try {
+      stmt.bind(ids);
+      const results: Array<{ id: string; sessionId: string; projectId: string; content: string; tokenCount: number; chunkIndex: number; createdAt: number }> = [];
+      while (stmt.step()) {
+        const row = stmt.getAsObject();
+        results.push({
+          id: row.id as string,
+          sessionId: row.sessionId as string,
+          projectId: row.projectId as string,
+          content: row.content as string,
+          tokenCount: row.tokenCount as number,
+          chunkIndex: row.chunkIndex as number,
+          createdAt: row.createdAt as number,
+        });
+      }
+      return results;
+    } finally {
+      stmt.free();
+    }
+  }
+
+  async deleteChunksBySession(sessionId: string): Promise<void> {
+    const db = this.getDb();
+    db.run('DELETE FROM chunks WHERE sessionId = ?', [sessionId]);
+    this.save();
+  }
+
+  async getChunkCount(projectId?: string): Promise<number> {
+    const db = this.getDb();
+    if (projectId) {
+      const stmt = db.prepare('SELECT COUNT(*) as c FROM chunks WHERE projectId = ?');
+      try {
+        stmt.bind([projectId]);
+        if (stmt.step()) return (stmt.getAsObject().c as number) || 0;
+      } finally {
+        stmt.free();
+      }
+      return 0;
+    }
+    return (db.exec('SELECT COUNT(*) as c FROM chunks')[0]?.values[0]?.[0] as number) || 0;
+  }
+
+  async getUnembeddedChunks(projectId?: string, limit?: number): Promise<Array<{ id: string; content: string }>> {
+    const db = this.getDb();
+    let query = projectId
+      ? 'SELECT c.id, c.content FROM chunks c LEFT JOIN chunk_embeddings ce ON c.id = ce.chunkId WHERE ce.chunkId IS NULL AND c.projectId = ?'
+      : 'SELECT c.id, c.content FROM chunks c LEFT JOIN chunk_embeddings ce ON c.id = ce.chunkId WHERE ce.chunkId IS NULL';
+    const params: any[] = projectId ? [projectId] : [];
+    if (limit) {
+      query += ' LIMIT ?';
+      params.push(limit);
+    }
+    const stmt = db.prepare(query);
+    try {
+      if (params.length) stmt.bind(params);
+      const results: Array<{ id: string; content: string }> = [];
+      while (stmt.step()) {
+        const row = stmt.getAsObject() as any;
+        results.push({ id: row.id, content: row.content });
+      }
+      return results;
+    } finally {
+      stmt.free();
+    }
   }
 
   // === Row mappers ===
