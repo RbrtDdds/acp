@@ -22,7 +22,6 @@ Claude can:
 - **`acp_context`** — get proactive context at session start
 - **`acp_recall`** — search memory ("what did we decide about auth?")
 - **`acp_remember`** — save important facts for future sessions
-- **`acp_import`** — import past Claude Code sessions
 
 ## Quick Start
 
@@ -54,17 +53,9 @@ acp setup global
 
 This adds instructions to `~/.claude/CLAUDE.md` so Claude calls `acp_context` at the start of every session and uses `acp_recall` / `acp_remember` throughout.
 
-### 5. Import your Claude Code history (optional)
+That's it. Now every `claude` session has persistent memory. ACP builds up knowledge organically as you work — Claude saves important decisions, conventions, and learnings automatically via `acp_remember`.
 
-```bash
-acp import claude-code
-```
-
-This reads all your sessions from `~/.claude/projects/`, extracts facts (decisions, stack, conventions, etc.), and stores them in ACP memory.
-
-That's it. Now every `claude` session has persistent memory.
-
-### 6. Use it
+### 5. Use it
 
 Just use `claude` as normal. Claude now has these tools available:
 
@@ -75,7 +66,6 @@ Just use `claude` as normal. Claude now has these tools available:
 | `acp_remember` | Save a new fact, decision, or learning to persistent memory |
 | `acp_status` | Show memory stats — facts, sessions, storage size |
 | `acp_facts` | List all stored facts for current project |
-| `acp_import` | Import Claude Code sessions into ACP memory |
 
 ### Example: Claude with ACP memory
 
@@ -111,7 +101,6 @@ This wraps the `claude` CLI with context injection (via CLAUDE.md backup/restore
 
 ```bash
 acp init                              # Initialize ACP
-acp import claude-code                # Import Claude Code sessions
 acp status                            # Memory stats
 acp status -p my-project              # Stats for specific project
 acp recall "auth middleware"           # Search context (current project from CWD)
@@ -126,7 +115,7 @@ acp export my-project -f json         # Export as JSON
 acp compact                           # Run memory compaction
 acp setup global                      # Inject ACP instructions into ~/.claude/CLAUDE.md
 acp setup project                     # Inject into local CLAUDE.md only
-acp claude                            # Wrap claude CLI with ACP memory (legacy)
+acp import claude-code                # Import old Claude Code sessions (optional)
 ```
 
 ### Project Scoping

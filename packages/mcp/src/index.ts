@@ -97,9 +97,9 @@ async function main() {
   // Save a new fact to ACP memory
   server.tool(
     'acp_remember',
-    'Save an important fact, decision, or learning to persistent memory. Use this when the user makes a significant decision, discovers something important, establishes a convention, or when you want to remember something for future sessions.',
+    'Save an important fact, decision, or learning to persistent memory. Use this when the user makes a significant decision, discovers something important, establishes a convention, or when you want to remember something for future sessions. Keep facts concise — one clear sentence per fact, max 300 characters. Save the essence, not the details.',
     {
-      content: z.string().describe('The fact to remember (e.g. "We decided to use Supabase for auth instead of Firebase")'),
+      content: z.string().max(300).describe('The fact to remember — one concise sentence (e.g. "We use JWT for auth instead of Supabase sessions")'),
       type: z.enum([
         'stack', 'decision', 'architecture', 'convention',
         'blocker', 'task', 'learning', 'preference', 'contact', 'custom'
@@ -193,93 +193,6 @@ async function main() {
     }
   );
 
-  // === Tool: acp_import ===
-  // Import Claude Code sessions for current project
-  server.tool(
-    'acp_import',
-    'Import Claude Code sessions for the current project into ACP memory. Run this to populate ACP with your conversation history.',
-    {},
-    async () => {
-      const reader = acp.getClaudeReader();
-      const allProjects = reader.listProjects();
-      const encodedPath = reader.findProject(project.path);
-
-      if (!encodedPath) {
-        return {
-          content: [{ type: 'text' as const, text: `No Claude Code sessions found for ${project.path}` }],
-        };
-      }
-
-      // Find the decoded path from listProjects
-      const matched = allProjects.find((p) => p.encodedPath === encodedPath);
-      if (!matched) {
-        return {
-          content: [{ type: 'text' as const, text: `No Claude Code sessions found for ${project.path}` }],
-        };
-      }
-
-      try {
-        const result = await acp.importClaudeSessions(
-          matched.decodedPath,
-          project.name,
-          undefined,
-          project.path  // realPath — use actual CWD
-        );
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `Imported ${result.imported} sessions, ${result.chunks} chunks, ${result.facts} facts, ${result.embedded} embedded for "${project.name}".`,
-          }],
-        };
-      } catch (err: any) {
-        return {
-          content: [{ type: 'text' as const, text: `Import failed: ${err.message}` }],
-        };
-      }
-    }
-  );
-
-  // Track whether auto-import has run this session (one-time per MCP lifecycle)
-  let autoImportDone = false;
-
-  /**
-   * Auto-import: if project has no chunks, import Claude Code sessions once.
-   * Returns a status message or empty string if skipped.
-   */
-  async function autoImportIfNeeded(): Promise<string> {
-    if (autoImportDone) return '';
-    autoImportDone = true;
-
-    // Check if project already has data
-    const stats = await acp.getStats(currentProject.id);
-    if (stats.totalChunks > 0) return '';
-
-    // No data yet — try auto-import
-    const reader = acp.getClaudeReader();
-    const encodedPath = reader.findProject(project.path);
-    if (!encodedPath) return '';
-
-    const allProjects = reader.listProjects();
-    const matched = allProjects.find((p) => p.encodedPath === encodedPath);
-    if (!matched) return '';
-
-    try {
-      process.stderr.write(`[ACP] First use for "${project.name}" — auto-importing sessions...\n`);
-      const result = await acp.importClaudeSessions(
-        matched.decodedPath,
-        project.name,
-        undefined,
-        project.path  // realPath — use actual CWD so project ID matches
-      );
-      const msg = `Auto-imported ${result.imported} sessions, ${result.chunks} chunks, ${result.facts} facts, ${result.embedded} embedded.`;
-      process.stderr.write(`[ACP] ${msg}\n`);
-      return msg;
-    } catch (err: any) {
-      process.stderr.write(`[ACP] Auto-import failed: ${err.message}\n`);
-      return '';
-    }
-  }
-
   // === Tool: acp_context ===
   // Get proactive context for current session (auto-called at session start)
   server.tool(
@@ -287,9 +200,6 @@ async function main() {
     'Get proactive context for the current working directory. Call this at the start of each session to understand the project history and recent work. This is the most important tool — use it first.',
     {},
     async () => {
-      // Auto-import on first use (one-time per project)
-      const importMsg = await autoImportIfNeeded();
-
       const result = await acp.enrichMessage(
         `Working on ${currentProject.name} in ${project.path}`,
         currentProject.id,
@@ -297,22 +207,30 @@ async function main() {
       );
 
       if (result.facts.length === 0) {
-        const hint = importMsg
-          ? `${importMsg}\nHowever, no relevant context was found yet. The imported data may need embeddings or the project has no matching history.`
-          : `No prior context found for project "${currentProject.name}". This appears to be a new project or ACP hasn't imported sessions yet.`;
         return {
-          content: [{ type: 'text' as const, text: hint }],
+          content: [{ type: 'text' as const, text: `No prior context found for project "${currentProject.name}". ACP will build memory as you work — use acp_remember to save important decisions, conventions, and learnings.` }],
         };
       }
 
-      const header = importMsg
-        ? `${importMsg}\n\n📎 ACP Context for "${currentProject.name}" (${result.facts.length} facts, ~${result.tokenEstimate} tokens)\n\n`
-        : `📎 ACP Context for "${currentProject.name}" (${result.facts.length} facts, ~${result.tokenEstimate} tokens)\n\n`;
+      const header = `📎 ACP Context for "${currentProject.name}" (${result.facts.length} facts, ~${result.tokenEstimate} tokens)\n\n`;
       return {
         content: [{ type: 'text' as const, text: header + result.text }],
       };
     }
   );
+
+  // Run compaction on shutdown (session end)
+  async function onShutdown() {
+    try {
+      await acp.runCompaction(currentProject.id);
+      process.stderr.write('[ACP] Compaction complete.\n');
+    } catch { /* non-fatal */ }
+    await acp.close();
+    process.exit(0);
+  }
+
+  process.on('SIGTERM', onShutdown);
+  process.on('SIGINT', onShutdown);
 
   // Start server
   const transport = new StdioServerTransport();

@@ -41,7 +41,6 @@ The MCP server exposes these tools to Claude:
 
 Get proactive context for current project. Call at the **start of every session**.
 
-- Auto-imports Claude Code sessions on first use (one-time per project)
 - Returns relevant facts and project history
 - No parameters required
 
@@ -78,10 +77,6 @@ List all stored facts for current project.
 |-----------|------|---------|-------------|
 | `type` | string | — | Filter by fact type (optional) |
 | `limit` | number | 50 | Maximum facts to return |
-
-### `acp_import`
-
-Import Claude Code sessions into ACP memory. No parameters. Useful for manually triggering import when `acp_context` auto-import isn't sufficient.
 
 ## How it works
 
