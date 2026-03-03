@@ -1,6 +1,6 @@
 {
   "name": "@rbrtdds/acp-cli",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "AI Context Protocol — CLI tool for managing AI memory",
   "type": "module",
   "bin": {
@@ -17,7 +17,14 @@
     "clean": "rm -rf dist",
     "prepublishOnly": "pnpm run build"
   },
-  "keywords": ["ai", "context", "memory", "claude", "llm", "cli"],
+  "keywords": [
+    "ai",
+    "context",
+    "memory",
+    "claude",
+    "llm",
+    "cli"
+  ],
   "author": "Robert Dudas",
   "license": "MIT",
   "repository": {

@@ -256,7 +256,50 @@ export class ClaudeCodeReader {
    */
   findProject(fsPath: string): string | null {
     const projects = this.listProjects();
-    return projects.find((p) => p.decodedPath === fsPath)?.encodedPath || null;
+
+    // Strategy 1: exact decoded path match
+    const exact = projects.find((p) => p.decodedPath === fsPath);
+    if (exact) return exact.encodedPath;
+
+    // Strategy 2: encode the input path and compare encoded forms directly.
+    const encoded = this.encodePath(fsPath);
+    const byEncoded = projects.find((p) => p.encodedPath === encoded);
+    if (byEncoded) return byEncoded.encodedPath;
+
+    // Strategy 3: normalize both sides (replace _ with - and compare).
+    // Handles renamed dirs: unified_poc/360-copilot vs unified/poc/360/copilot
+    // Both normalize to: unified-poc-360-copilot
+    const normalized = this.normalizePath(fsPath);
+    const byNormalized = projects.find((p) => this.normalizePath(p.decodedPath) === normalized);
+    if (byNormalized) return byNormalized.encodedPath;
+
+    // Strategy 4: suffix match on normalized last 2-3 segments
+    const normalizedParts = normalized.split('-').filter(Boolean);
+    if (normalizedParts.length >= 2) {
+      const tail = normalizedParts.slice(-3).join('-');
+      const bySuffix = projects.find((p) =>
+        this.normalizePath(p.decodedPath).endsWith(tail)
+      );
+      if (bySuffix) return bySuffix.encodedPath;
+    }
+
+    return null;
+  }
+
+  /**
+   * Encode a filesystem path to Claude Code's encoded format.
+   */
+  private encodePath(fsPath: string): string {
+    return fsPath.replace(/\//g, '-');
+  }
+
+  /**
+   * Normalize a path for fuzzy comparison.
+   * Replaces /, _, and whitespace with - so paths that differ only in
+   * separator style (unified_poc vs unified/poc) compare as equal.
+   */
+  private normalizePath(p: string): string {
+    return p.replace(/[\/\\_\s]+/g, '-').toLowerCase();
   }
 
   /**
@@ -349,7 +392,59 @@ export class ClaudeCodeReader {
    * Decode Claude Code's URL-encoded project path.
    * e.g., "-Users-robertdudas-Projects-Private-matchhub" → "/Users/robertdudas/Projects/Private/matchhub"
    */
+  /**
+   * Decode Claude Code's encoded path back to a filesystem path.
+   *
+   * Claude Code encodes paths by replacing / with -.
+   * This is lossy (360-copilot vs 360/copilot), so we verify
+   * against the actual filesystem and try alternatives if needed.
+   */
   private decodePath(encoded: string): string {
-    return encoded.replace(/-/g, '/');
+    const naive = encoded.replace(/-/g, '/');
+    if (existsSync(naive)) return naive;
+
+    // Naive decode didn't match — try to find the real path.
+    // Walk the encoded string segment by segment, checking which
+    // combinations of - (as separator) vs - (literal) actually exist on disk.
+    const resolved = this.resolveEncodedPath(encoded);
+    return resolved || naive;
+  }
+
+  /**
+   * Try to resolve an encoded path to a real filesystem path.
+   * Uses DFS: at each '-', try both '/' (directory separator) and '-' (literal).
+   * Returns the first path that exists on disk, or null.
+   */
+  private resolveEncodedPath(encoded: string): string | null {
+    // Remove leading dash
+    const clean = encoded.startsWith('-') ? encoded.slice(1) : encoded;
+    const parts = clean.split('-');
+
+    // DFS with pruning: build path left-to-right
+    const search = (idx: number, current: string): string | null => {
+      if (idx >= parts.length) {
+        return existsSync(current) ? current : null;
+      }
+
+      const segment = parts[idx];
+
+      // Option 1: this dash was a / (new directory level)
+      const asDir = current + '/' + segment;
+      if (existsSync(asDir) || idx === parts.length - 1) {
+        const result = search(idx + 1, asDir);
+        if (result) return result;
+      }
+
+      // Option 2: this dash was literal (append to current segment)
+      const asLiteral = current + '-' + segment;
+      if (idx > 0) {
+        const result = search(idx + 1, asLiteral);
+        if (result) return result;
+      }
+
+      return null;
+    };
+
+    return search(1, '/' + parts[0]);
   }
 }

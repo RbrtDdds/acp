@@ -10,15 +10,17 @@
     "rebuild": "pnpm run clean && pnpm install && pnpm run build",
     "link": "cd packages/cli && npm link",
     "changeset": "changeset",
+    "changeset:auto": "bash scripts/auto-changeset.sh",
     "version": "changeset version",
-    "publish:dry": "pnpm run version && pnpm run build && pnpm -r publish --dry-run --no-git-checks",
-    "publish:npm": "pnpm run version && pnpm run build && pnpm -r publish --no-git-checks",
-    "release": "pnpm run version && pnpm run build && changeset publish"
+    "publish:dry": "pnpm run changeset:auto && pnpm run version && pnpm run build && pnpm -r publish --dry-run --no-git-checks",
+    "publish:npm": "pnpm run changeset:auto && pnpm run version && pnpm run build && pnpm -r publish --no-git-checks",
+    "release": "pnpm run changeset:auto && pnpm run version && pnpm run build && changeset publish"
   },
   "keywords": ["ai", "context", "memory", "cli", "claude", "llm"],
   "author": "Robert Dudas",
   "license": "MIT",
   "devDependencies": {
-    "@changesets/cli": "^2.29.0"
+    "@changesets/cli":
+    "^2.29.0"
   }
 }

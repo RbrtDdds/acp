@@ -2,6 +2,8 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
 import inquirer from 'inquirer';
+import { realpathSync } from 'fs';
+import { resolve } from 'path';
 import { createACP } from '../utils/acp-instance.js';
 
 export const importCommand = new Command('import')
@@ -49,8 +51,10 @@ importCommand
       let selectedProjects = projects;
       let maxSessionsOverride: number | undefined = options.sessions;
 
-      if (options.path) {
-        selectedProjects = projects.filter((p) => p.decodedPath === options.path);
+      const requestedPath = options.path ? canonicalizePath(options.path) : undefined;
+
+      if (requestedPath) {
+        selectedProjects = projects.filter((p) => canonicalizePath(p.decodedPath) === requestedPath);
         if (selectedProjects.length === 0) {
           console.log(chalk.yellow(`No project found for path: ${options.path}\n`));
           return;
@@ -61,7 +65,7 @@ importCommand
           const name = p.decodedPath.split('/').pop() || p.decodedPath;
           const activity = p.lastActivity ? timeAgo(p.lastActivity) : 'unknown';
           return {
-            name: `${name}  ${chalk.dim(`${p.sessionCount} sessions, last active ${activity}`)}`,
+            name: `${chalk.bold(name)}  ${chalk.dim(p.decodedPath)}  ${chalk.dim(`${p.sessionCount} sessions, ${activity}`)}`,
             value: p,
             checked: true,
             short: name,
@@ -112,6 +116,7 @@ importCommand
 
       let totalImported = 0;
       let totalChunks = 0;
+      let totalFacts = 0;
       let totalEmbedded = 0;
 
       for (const cp of selectedProjects) {
@@ -122,16 +127,19 @@ importCommand
           const result = await acp.importClaudeSessions(
             cp.decodedPath,
             cp.decodedPath.split('/').pop() || 'unnamed',
-            maxSessionsOverride
+            maxSessionsOverride,
+            // Persist canonical project path for stable project identity.
+            requestedPath || canonicalizePath(cp.decodedPath)
           );
 
           const embeddedInfo = result.embedded > 0 ? `, ${result.embedded} embedded` : '';
           spinner.succeed(
-            `${chalk.green(result.project.name)}: ${result.imported} sessions, ${result.facts} chunks${embeddedInfo}`
+            `${chalk.green(result.project.name)}: ${result.imported} sessions, ${result.chunks} chunks, ${result.facts} facts${embeddedInfo}`
           );
 
           totalImported += result.imported;
-          totalChunks += result.facts;
+          totalChunks += result.chunks;
+          totalFacts += result.facts;
           totalEmbedded += result.embedded;
         } catch (err: any) {
           spinner.fail(`Failed: ${err.message}`);
@@ -139,7 +147,7 @@ importCommand
       }
 
       const embeddedSummary = totalEmbedded > 0 ? `, ${totalEmbedded} embedded` : '';
-      console.log(chalk.bold(`\n✅ Import: ${totalImported} sessions, ${totalChunks} chunks${embeddedSummary}\n`));
+      console.log(chalk.bold(`\n✅ Import: ${totalImported} sessions, ${totalChunks} chunks, ${totalFacts} facts${embeddedSummary}\n`));
 
       console.log(`   ${chalk.cyan('acp status')}  — see your memory`);
       console.log(`   ${chalk.cyan('acp recall "query"')}  — search\n`);
@@ -147,3 +155,11 @@ importCommand
       await acp.close();
     }
   });
+
+function canonicalizePath(p: string): string {
+  try {
+    return realpathSync.native ? realpathSync.native(p) : realpathSync(p);
+  } catch {
+    return resolve(p);
+  }
+}

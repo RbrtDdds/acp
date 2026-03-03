@@ -1,6 +1,6 @@
 {
   "name": "@rbrtdds/acp-embeddings",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "AI Context Protocol — local embedding provider using transformers.js",
   "type": "module",
   "main": "./dist/index.js",
@@ -22,7 +22,13 @@
     "clean": "rm -rf dist",
     "prepublishOnly": "pnpm run build"
   },
-  "keywords": ["ai", "embeddings", "transformers", "semantic-search", "huggingface"],
+  "keywords": [
+    "ai",
+    "embeddings",
+    "transformers",
+    "semantic-search",
+    "huggingface"
+  ],
   "author": "Robert Dudas",
   "license": "MIT",
   "repository": {

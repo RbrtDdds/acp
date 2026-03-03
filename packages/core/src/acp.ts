@@ -1,5 +1,6 @@
 import { v4 as uuid } from 'uuid';
 import { createHash } from 'crypto';
+import { normalize, resolve } from 'path';
 import { SQLiteAdapter } from './adapters/sqlite.adapter.js';
 import { NativeSQLiteAdapter } from './adapters/native-sqlite.adapter.js';
 import { FactExtractor } from './engine/fact-extractor.js';
@@ -91,28 +92,48 @@ export class ACP {
   // === Projects ===
 
   async getOrCreateProject(name: string, path?: string): Promise<Project> {
-    // Try to find by name first
-    let project = await this.storage.getProjectByName(name);
-    if (project) {
-      await this.storage.updateProject({ id: project.id, lastAccessed: Date.now() });
-      return { ...project, lastAccessed: Date.now() };
-    }
+    const now = Date.now();
+    const normalizedPath = path ? this.normalizeProjectPath(path) : undefined;
 
-    // Try by path
-    if (path) {
-      project = await this.storage.getProjectByPath(path);
+    // Path is the strongest identity signal. Resolve by path first to avoid
+    // collisions when multiple repos share the same folder name.
+    if (normalizedPath) {
+      let project = await this.storage.getProjectByPath(normalizedPath);
       if (project) {
-        await this.storage.updateProject({ id: project.id, lastAccessed: Date.now() });
-        return { ...project, lastAccessed: Date.now() };
+        await this.storage.updateProject({ id: project.id, lastAccessed: now });
+        return { ...project, lastAccessed: now };
+      }
+
+      // Backward compatibility: older records may have non-normalized paths.
+      if (path !== normalizedPath) {
+        project = await this.storage.getProjectByPath(path!);
+        if (project) {
+          await this.storage.updateProject({
+            id: project.id,
+            path: normalizedPath,
+            lastAccessed: now,
+          });
+          return { ...project, path: normalizedPath, lastAccessed: now };
+        }
       }
     }
 
+    // Name-only fallback (for projects without path).
+    if (!normalizedPath) {
+      const project = await this.storage.getProjectByName(name);
+      if (project) {
+        await this.storage.updateProject({ id: project.id, lastAccessed: now });
+        return { ...project, lastAccessed: now };
+      }
+    }
+
+    const projectName = await this.ensureUniqueProjectName(name, normalizedPath);
+
     // Create new
-    const now = Date.now();
     const newProject: Project = {
       id: uuid(),
-      name,
-      path,
+      name: projectName,
+      path: normalizedPath,
       createdAt: now,
       lastAccessed: now,
       metadata: {},
@@ -155,6 +176,12 @@ export class ACP {
 
     // Extract facts before transaction (CPU-only, no I/O)
     const extractedFacts = this.extractor.extractFromMessages(messages, projectId, session.id);
+
+    // Generate session-level summary for coherent context
+    const summaryFact = this.extractor.generateSessionSummary(messages, projectId, session.id);
+    if (summaryFact) {
+      extractedFacts.push(summaryFact);
+    }
 
     // Cross-session deduplication: use content hash for O(n) exact dedup,
     // then Jaccard only for fuzzy dedup on remaining candidates
@@ -233,8 +260,10 @@ export class ACP {
   async importClaudeSessions(
     projectPath: string,
     projectName?: string,
-    overrideMaxSessions?: number
-  ): Promise<{ project: Project; imported: number; facts: number; embedded: number }> {
+    overrideMaxSessions?: number,
+    /** Real filesystem path for project record (use when projectPath is a decoded/fuzzy path) */
+    realPath?: string
+  ): Promise<{ project: Project; imported: number; chunks: number; facts: number; embedded: number }> {
     const encodedPath = this.claudeReader.findProject(projectPath);
     if (!encodedPath) {
       throw new Error(`No Claude Code sessions found for path: ${projectPath}`);
@@ -242,17 +271,24 @@ export class ACP {
 
     const project = await this.getOrCreateProject(
       projectName || projectPath.split('/').pop() || 'unnamed',
-      projectPath
+      realPath || projectPath
     );
 
     const maxSessions = overrideMaxSessions || this.config.maxSessions || DEFAULT_MAX_SESSIONS;
     const sessionIds = this.claudeReader.listSessions(encodedPath);
 
     let totalChunks = 0;
+    let totalFacts = 0;
     let imported = 0;
 
     const chunkStore = this.recallEngine.getChunkStore();
     let totalEmbedded = 0;
+
+    // Build dedup cache once to keep import O(n) and prevent duplicate low-value facts.
+    const existingFacts = await this.storage.listFacts({ projectId: project.id });
+    const existingHashes = new Set(
+      existingFacts.map((f) => this.contentHash(f.type, f.content))
+    );
 
     // Phase 1: Store text chunks in a single transaction
     await this.storage.withTransaction(async () => {
@@ -262,32 +298,69 @@ export class ACP {
         try {
           let cs = await this.claudeReader.readSessionStreaming(encodedPath, sessionId);
           if (!cs) continue;
+          let sessionChanged = false;
 
           const msgCount = cs.messages.length;
           const tokenCount = cs.messages.reduce((sum, m) => sum + Math.ceil(m.content.length / 4), 0);
 
-          // Create session record
-          await this.storage.createSession({
-            id: sessionId,
-            projectId: project.id,
-            source: 'claude-cli',
-            createdAt: cs.messages[0]?.timestamp || Date.now(),
-            lastAccessed: cs.messages[msgCount - 1]?.timestamp || Date.now(),
-            tier: 'hot',
-            messageCount: msgCount,
-            tokenCount,
-            compressedTokenCount: 0,
-            tags: [],
-            pinned: false,
+          const existingSession = await this.storage.getSession(sessionId);
+          if (!existingSession) {
+            // Create session record
+            await this.storage.createSession({
+              id: sessionId,
+              projectId: project.id,
+              source: 'claude-cli',
+              createdAt: cs.messages[0]?.timestamp || Date.now(),
+              lastAccessed: cs.messages[msgCount - 1]?.timestamp || Date.now(),
+              tier: 'hot',
+              messageCount: msgCount,
+              tokenCount,
+              compressedTokenCount: 0,
+              tags: [],
+              pinned: false,
+            });
+
+            const chunks = await chunkStore.storeSession(project.id, sessionId, cs.messages);
+            totalChunks += chunks;
+            sessionChanged = true;
+          }
+
+          // Extract and persist structured facts during import.
+          // This is what powers keyword recall even without embeddings.
+          const extractedFacts = this.extractor.extractFromMessages(cs.messages, project.id, sessionId);
+
+          // Generate a session-level summary fact for coherent context
+          const summaryFact = this.extractor.generateSessionSummary(cs.messages, project.id, sessionId);
+          if (summaryFact) {
+            extractedFacts.push(summaryFact);
+          }
+
+          const newFacts = extractedFacts.filter((newFact) => {
+            const hash = this.contentHash(newFact.type, newFact.content);
+            if (existingHashes.has(hash)) return false;
+
+            const fuzzyDup = existingFacts.some(
+              (existing) =>
+                existing.type === newFact.type &&
+                this.contentSimilarity(existing.content, newFact.content) > SIMILARITY_THRESHOLD
+            );
+            if (fuzzyDup) return false;
+
+            existingHashes.add(hash);
+            existingFacts.push(newFact);
+            return true;
           });
 
-          const chunks = await chunkStore.storeSession(project.id, sessionId, cs.messages);
+          for (const fact of newFacts) {
+            await this.storage.createFact(fact);
+          }
+          totalFacts += newFacts.length;
+          if (newFacts.length > 0) sessionChanged = true;
 
           // Release session data — SlicedString refs may keep JSON strings alive
           cs = null as any;
 
-          totalChunks += chunks;
-          imported++;
+          if (sessionChanged) imported++;
         } catch (err) {
           process.stderr?.write?.(`[ACP] Failed session ${sessionId}: ${err}\n`);
         }
@@ -314,7 +387,7 @@ export class ACP {
       }
     }
 
-    return { project, imported, facts: totalChunks, embedded: totalEmbedded };
+    return { project, imported, chunks: totalChunks, facts: totalFacts, embedded: totalEmbedded };
   }
 
   // === Recall ===
@@ -508,5 +581,31 @@ export class ACP {
       default:
         return new SQLiteAdapter(this.config.storagePath);
     }
+  }
+
+  private normalizeProjectPath(path: string): string {
+    const normalized = normalize(resolve(path));
+    const stripped = normalized.replace(/[\\/]+$/, '');
+    return stripped || normalized;
+  }
+
+  private async ensureUniqueProjectName(baseName: string, normalizedPath?: string): Promise<string> {
+    const existing = await this.storage.getProjectByName(baseName);
+    if (!existing) return baseName;
+
+    // Same logical project — keep the original name.
+    if (normalizedPath && existing.path && this.normalizeProjectPath(existing.path) === normalizedPath) {
+      return baseName;
+    }
+
+    const parts = (normalizedPath || '').split(/[\\/]/).filter(Boolean);
+    const suffix = parts.length >= 2 ? `${parts[parts.length - 2]}/${parts[parts.length - 1]}` : 'project';
+    let candidate = `${baseName} (${suffix})`;
+    let n = 2;
+    while (await this.storage.getProjectByName(candidate)) {
+      candidate = `${baseName} (${suffix} #${n})`;
+      n++;
+    }
+    return candidate;
   }
 }

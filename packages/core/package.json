@@ -1,6 +1,6 @@
 {
   "name": "@rbrtdds/acp-core",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "AI Context Protocol — core library for persistent AI memory",
   "type": "module",
   "main": "./dist/index.js",
@@ -23,7 +23,15 @@
     "clean": "rm -rf dist",
     "prepublishOnly": "pnpm run build"
   },
-  "keywords": ["ai", "context", "memory", "claude", "llm", "mcp", "semantic-search"],
+  "keywords": [
+    "ai",
+    "context",
+    "memory",
+    "claude",
+    "llm",
+    "mcp",
+    "semantic-search"
+  ],
   "author": "Robert Dudas",
   "license": "MIT",
   "repository": {

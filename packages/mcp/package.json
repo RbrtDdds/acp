@@ -1,6 +1,6 @@
 {
   "name": "@rbrtdds/acp-mcp",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "AI Context Protocol — MCP server for Claude Code integration",
   "type": "module",
   "main": "./dist/index.js",
@@ -18,7 +18,14 @@
     "clean": "rm -rf dist",
     "prepublishOnly": "pnpm run build"
   },
-  "keywords": ["ai", "context", "memory", "claude", "mcp", "model-context-protocol"],
+  "keywords": [
+    "ai",
+    "context",
+    "memory",
+    "claude",
+    "mcp",
+    "model-context-protocol"
+  ],
   "author": "Robert Dudas",
   "license": "MIT",
   "repository": {

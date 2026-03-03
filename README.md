@@ -29,44 +29,38 @@ Claude can:
 ### 1. Install
 
 ```bash
-git clone https://github.com/robodudas/acp.git
-cd acp
-pnpm install
-pnpm -r build
+npm i -g @rbrtdds/acp-cli @rbrtdds/acp-mcp
 ```
 
 ### 2. Initialize ACP
 
 ```bash
-# Link CLI globally
-pnpm setup              # (if not yet configured)
-cd packages/cli && pnpm link --global && cd ../..
-
-# Initialize (choose storage: local/cloud/self-hosted)
 acp init
 ```
 
-### 3. Import your Claude Code history
+This creates `~/.acp/` with a local SQLite database. No additional setup required.
+
+### 3. Connect to Claude Code
 
 ```bash
-acp import claude-code
+claude mcp add --transport stdio --scope user acp -- acp-mcp
 ```
 
-This reads all your sessions from `~/.claude/projects/`, extracts facts (decisions, stack, conventions, etc.), and stores them in ACP memory.
-
-### 4. Connect to Claude Code (MCP server)
-
-```bash
-claude mcp add --transport stdio --scope user acp -- node $(pwd)/packages/mcp/dist/index.js
-```
-
-### 5. Tell Claude to use ACP automatically
+### 4. Tell Claude to use ACP automatically
 
 ```bash
 acp setup global
 ```
 
 This adds instructions to `~/.claude/CLAUDE.md` so Claude calls `acp_context` at the start of every session and uses `acp_recall` / `acp_remember` throughout.
+
+### 5. Import your Claude Code history (optional)
+
+```bash
+acp import claude-code
+```
+
+This reads all your sessions from `~/.claude/projects/`, extracts facts (decisions, stack, conventions, etc.), and stores them in ACP memory.
 
 That's it. Now every `claude` session has persistent memory.
 
@@ -212,9 +206,20 @@ ACP automatically deduplicates facts across sessions using a two-pass approach: 
 | `@rbrtdds/acp-mcp` | MCP server — native Claude Code integration |
 | `@rbrtdds/acp-embeddings` | Optional local embedding provider (transformers.js) |
 
-## Contributing
+## Development
 
-This project uses **conventional commits** (enforced by commitlint + husky) and **changesets** for semantic versioning.
+For contributing or running from source:
+
+```bash
+git clone https://github.com/robodudas/acp.git
+cd acp
+pnpm install
+pnpm run build
+```
+
+### Commit Conventions
+
+This project uses **conventional commits** and **changesets** for semantic versioning.
 
 ```bash
 # After making changes:

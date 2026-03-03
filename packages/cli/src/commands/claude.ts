@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { spawn } from 'child_process';
-import { writeFileSync, readFileSync, existsSync } from 'fs';
-import { join } from 'path';
+import { writeFileSync, readFileSync, existsSync, realpathSync } from 'fs';
+import { basename, join, resolve } from 'path';
 import chalk from 'chalk';
 import { createACP } from '../utils/acp-instance.js';
 import type { Project } from '@rbrtdds/acp-core';
@@ -27,8 +27,8 @@ export const claudeCommand = new Command('claude')
   .allowUnknownOption(true)
   .allowExcessArguments(true)
   .action(async (options, command) => {
-    const cwd = process.cwd();
-    const projectName = cwd.split('/').pop() || 'unnamed';
+    const cwd = canonicalizePath(process.cwd());
+    const projectName = basename(cwd) || 'unnamed';
     const claudeMdPath = join(cwd, 'CLAUDE.md');
 
     // Unknown options/args get passed through to `claude`
@@ -50,6 +50,28 @@ export const claudeCommand = new Command('claude')
 
       if (options.verbose) {
         console.error(chalk.dim(`[ACP] Project: ${project.name} (${project.id})`));
+      }
+
+      // 1b. Auto-import on first use (if project has no data yet)
+      const stats = await acp.getStats(project.id);
+      if (stats.totalChunks === 0) {
+        const reader = acp.getClaudeReader();
+        const encodedPath = reader.findProject(cwd);
+        if (encodedPath) {
+          const allProjects = reader.listProjects();
+          const matched = allProjects.find((p: any) => p.encodedPath === encodedPath);
+          if (matched) {
+            console.error(chalk.cyan(`⚡ First use — importing sessions for ${projectName}...`));
+            try {
+              const importResult = await acp.importClaudeSessions(matched.decodedPath, projectName, undefined, cwd);
+              console.error(chalk.green(`📥 Imported ${importResult.imported} sessions, ${importResult.chunks} chunks, ${importResult.facts} facts, ${importResult.embedded} embedded`));
+            } catch (err: any) {
+              if (options.verbose) {
+                console.error(chalk.dim(`[ACP] Auto-import failed: ${err.message}`));
+              }
+            }
+          }
+        }
       }
 
       // 2. Recall context
@@ -230,7 +252,6 @@ async function autoImportLatest(
   // Stream only new sessions one at a time instead of loading all into RAM
   let imported = 0;
   let facts = 0;
-  const oneHourAgo = Date.now() - 60 * 60 * 1000;
 
   for (const sessionId of sessionIds) {
     if (existingIds.has(sessionId)) continue;
@@ -238,9 +259,6 @@ async function autoImportLatest(
     // Read one session at a time via streaming reader
     const cs = await reader.readSessionStreaming(encodedPath, sessionId);
     if (!cs) continue;
-
-    // Only import recent sessions (last hour) to avoid re-importing everything
-    if (cs.endedAt < oneHourAgo) continue;
 
     const result = await acp.ingestClaudeSession(project.id, cs);
     imported++;
@@ -251,5 +269,13 @@ async function autoImportLatest(
     console.error(chalk.green(`\n📥 ACP auto-imported ${imported} new session(s), extracted ${facts} facts`));
   } else if (verbose) {
     console.error(chalk.dim('[ACP] No new sessions to import.'));
+  }
+}
+
+function canonicalizePath(p: string): string {
+  try {
+    return realpathSync.native ? realpathSync.native(p) : realpathSync(p);
+  } catch {
+    return resolve(p);
   }
 }
