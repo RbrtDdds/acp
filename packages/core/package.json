@@ -1,6 +1,6 @@
 {
   "name": "@rbrtdds/acp-core",
-  "version": "0.1.3",
+  "version": "0.1.5",
   "description": "AI Context Protocol — core library for persistent AI memory",
   "type": "module",
   "main": "./dist/index.js",

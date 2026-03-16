@@ -1,7 +1,7 @@
 # ACP Architecture
-
+    
 **Status:** Accepted
-**Date:** 2026-02-26
+**Date:** 2026-03-16
 **Author:** Robert Dudas
 
 ---
@@ -90,30 +90,36 @@ The `ACP` class wires everything together. Key methods:
 
 Command-line tool using Commander.js. Binary: `acp`.
 
-**Commands:** `init` (interactive config), `status` (stats per project), `recall` (search), `import` (Claude Code sessions), `facts` (list/manage), `sessions` (list), `export` (CLAUDE.md/JSON), `compact` (tier down), `setup` (inject instructions), `embed` (batch embed), `claude` (legacy wrapper with auto-import).
+**Commands (11):** `init` (full setup — config, MCP registration, CLAUDE.md), `status` (stats per project), `recall` (search), `import` (Claude Code sessions), `facts` (list/manage), `sessions` (list), `export` (CLAUDE.md/JSON), `compact` (tier down), `setup` (update instructions), `embed` (batch embed), `claude` (legacy wrapper with auto-import).
 
-**Auto-import flow:** `acp claude` checks if project has 0 chunks. If so, finds matching Claude Code project and imports before starting Claude.
+**`acp init` flow:**
+1. Interactive prompts — SQLite engine (WASM/Native) and embedding config
+2. Saves `~/.acp/config.json` (0o600 permissions)
+3. Verifies `acp-mcp` binary is in PATH, registers MCP server via `claude mcp add` (15s timeout, fallback instructions on failure)
+4. Injects ACP instructions into `~/.claude/CLAUDE.md` (marker-based block — updates existing or prepends)
+5. Prints summary with per-step status and verification checklist
 
 **Embed worker:** `src/workers/embed-worker.ts` runs in child process with 8GB heap for large batch embedding without bloating main process.
 
 ## MCP Package (`@rbrtdds/acp-mcp`)
 
-MCP server for native Claude Code integration via stdio transport. Detected project from CWD.
+MCP server for native Claude Code integration via stdio transport. Project auto-detected from CWD.
 
-**Tools (6):**
+**Tools (5):**
 
 | Tool | Purpose |
 |------|---------|
-| `acp_context` | Proactive context at session start (auto-imports if first use) |
-| `acp_recall` | Search memory by query (hybrid search) |
-| `acp_remember` | Save fact to memory |
-| `acp_status` | Get memory statistics |
-| `acp_facts` | List all facts for current project |
-| `acp_import` | Import Claude Code sessions for current project |
+| `acp_context` | Proactive context at session start (calls `enrichMessage`) |
+| `acp_recall` | Search memory by query (hybrid search, scoped to project or all) |
+| `acp_remember` | Save fact to memory (max 300 chars, with type and confidence) |
+| `acp_status` | Get memory statistics (current project + global) |
+| `acp_facts` | List all facts for current project (filterable by type) |
 
-**Auto-import:** On first `acp_context` call, if project has no chunks, auto-imports from `~/.claude/projects/`. One-time per MCP lifecycle (tracked by `autoImportDone` flag).
+**No auto-import.** Memory is built organically via `acp_remember` during normal use. Manual import available via `acp import claude-code` CLI command.
 
-**Project ID consistency:** Both CLI and MCP use `realPath` (actual CWD) when creating projects via `importClaudeSessions`, ensuring chunks are stored and searched under the same project ID.
+**Compaction on shutdown.** Runs `acp.runCompaction()` on SIGTERM/SIGINT before closing the database.
+
+**Project ID consistency:** Both CLI and MCP use actual CWD when creating/looking up projects, ensuring facts are stored and searched under the correct project ID.
 
 ## Embeddings Package (`@rbrtdds/acp-embeddings`)
 
@@ -217,11 +223,15 @@ Stored at `~/.acp/config.json` (0o600 permissions).
 
 **4. Project scoping by CWD.** Default search is current project only — prevents context leakage. Cross-project search available via `--all` flag.
 
-**5. MCP over CLI wrapper.** Native Claude Code integration via MCP tools instead of CLAUDE.md file injection. Auto-project detection from CWD. Auto-import on first use.
+**5. MCP over CLI wrapper.** Native Claude Code integration via MCP tools instead of CLAUDE.md file injection. Auto-project detection from CWD.
 
-**6. Lossy path matching.** Claude Code encodes paths by replacing `/` with `-`, which is irreversible (`360-copilot` -> `360/copilot`). Multi-strategy matching (exact, encoded, normalized, suffix) handles this gracefully.
+**6. Organic memory over auto-import.** Memory builds naturally via `acp_remember` during normal Claude usage. No auto-import — avoids noisy heuristic extraction on legacy sessions. Manual import available via CLI for users who want it.
 
-**7. `realPath` for project identity.** CLI and MCP both pass actual filesystem CWD to `importClaudeSessions`, ensuring chunks are stored under the correct project ID regardless of decoded path lossyness.
+**7. One-step setup.** `acp init` handles config, MCP registration, and CLAUDE.md injection in a single command. Each step has fallback instructions if it fails (e.g. `claude` CLI not in PATH). Partial success is clearly communicated.
+
+**8. Lossy path matching.** Claude Code encodes paths by replacing `/` with `-`, which is irreversible (`360-copilot` -> `360/copilot`). Multi-strategy matching (exact, encoded, normalized, suffix) handles this gracefully.
+
+**9. `realPath` for project identity.** CLI and MCP both pass actual filesystem CWD to `importClaudeSessions`, ensuring chunks are stored under the correct project ID regardless of decoded path lossyness.
 
 ## Known Limitations
 

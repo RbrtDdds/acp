@@ -1,6 +1,6 @@
 {
   "name": "@rbrtdds/acp-mcp",
-  "version": "0.1.3",
+  "version": "0.1.5",
   "description": "AI Context Protocol — MCP server for Claude Code integration",
   "type": "module",
   "main": "./dist/index.js",
