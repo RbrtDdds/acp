@@ -1,6 +1,6 @@
 {
   "name": "@rbrtdds/acp-embeddings",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "AI Context Protocol — local embedding provider using transformers.js",
   "type": "module",
   "main": "./dist/index.js",
