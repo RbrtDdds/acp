@@ -31,31 +31,22 @@ Claude can:
 npm i -g @rbrtdds/acp-cli @rbrtdds/acp-mcp
 ```
 
-### 2. Initialize ACP
+### 2. Initialize
 
 ```bash
 acp init
 ```
 
-This creates `~/.acp/` with a local SQLite database. No additional setup required.
+That's it. `acp init` handles everything in one step:
 
-### 3. Connect to Claude Code
+- Creates `~/.acp/config.json` with your storage and embedding preferences
+- Registers the MCP server with Claude Code (`claude mcp add`)
+- Adds ACP instructions to `~/.claude/CLAUDE.md`
+- Database is created automatically on first use
 
-```bash
-claude mcp add --transport stdio --scope user acp -- acp-mcp
-```
+ACP builds up knowledge organically as you work — Claude saves important decisions, conventions, and learnings automatically via `acp_remember`.
 
-### 4. Tell Claude to use ACP automatically
-
-```bash
-acp setup global
-```
-
-This adds instructions to `~/.claude/CLAUDE.md` so Claude calls `acp_context` at the start of every session and uses `acp_recall` / `acp_remember` throughout.
-
-That's it. Now every `claude` session has persistent memory. ACP builds up knowledge organically as you work — Claude saves important decisions, conventions, and learnings automatically via `acp_remember`.
-
-### 5. Use it
+### 3. Use it
 
 Just use `claude` as normal. Claude now has these tools available:
 
@@ -87,20 +78,10 @@ Claude: [calls acp_remember(type="decision", content="Switched from Supabase
   in future sessions.
 ```
 
-### Example: Claude wrapper (legacy)
-
-For environments where MCP isn't available, ACP also ships a `claude` wrapper:
-
-```bash
-acp claude
-```
-
-This wraps the `claude` CLI with context injection (via CLAUDE.md backup/restore) and auto-imports new sessions after each run. The MCP approach above is preferred.
-
 ## CLI Commands
 
 ```bash
-acp init                              # Initialize ACP
+acp init                              # Full setup — config, MCP registration, CLAUDE.md
 acp status                            # Memory stats
 acp status -p my-project              # Stats for specific project
 acp recall "auth middleware"           # Search context (current project from CWD)
@@ -113,9 +94,10 @@ acp facts pin <id>                    # Pin a fact (never compacted)
 acp export my-project                 # Export as CLAUDE.md
 acp export my-project -f json         # Export as JSON
 acp compact                           # Run memory compaction
-acp setup global                      # Inject ACP instructions into ~/.claude/CLAUDE.md
-acp setup project                     # Inject into local CLAUDE.md only
+acp setup global                      # Update ACP instructions in ~/.claude/CLAUDE.md
+acp setup project                     # Add instructions to local CLAUDE.md only
 acp import claude-code                # Import old Claude Code sessions (optional)
+acp embed                             # Embed un-embedded chunks
 ```
 
 ### Project Scoping
@@ -126,13 +108,14 @@ To search across all projects, use `--all` in CLI or `scope: "all"` in MCP. This
 
 ## Storage Options
 
-| Option | Description | Best for |
-|--------|-------------|----------|
-| **Local** (default) | SQLite in `~/.acp/acp.db` | Single device, maximum privacy |
-| **Cloud** | Supabase (PostgreSQL + pgvector) | Cross-device sync, team sharing |
-| **Self-hosted** | Your own PostgreSQL | Full control, enterprise |
+ACP uses SQLite with two engine choices (selected during `acp init`):
 
-Choose at `acp init`. Local is default and requires zero setup.
+| Engine | Technology | Pros | Trade-offs |
+|--------|------------|------|------------|
+| **WASM** (default) | sql.js | Zero native deps, works everywhere | Slower, higher memory |
+| **Native** | better-sqlite3 | ~10x faster, lower memory | Requires native build (`npm i better-sqlite3`) |
+
+All data is stored locally in `~/.acp/acp.db`. Database is created automatically on first use.
 
 ## Memory Model
 
@@ -170,30 +153,40 @@ ACP automatically deduplicates facts across sessions using a two-pass approach: 
 ## Architecture
 
 ```
-┌──────────────────────────────────────────┐
-│          Claude Code (claude CLI)         │
-│              ↕ MCP protocol               │
-├──────────────────────────────────────────┤
-│          ACP MCP Server (@rbrtdds/acp-mcp)       │
-│   acp_context │ acp_recall │ acp_remember │
-├──────────────────────────────────────────┤
-│          ACP Core (@rbrtdds/acp-core)            │
-│   Fact Extractor │ Recall Engine │       │
-│   Compaction    │ Claude Reader  │       │
-├──────────────────────────────────────────┤
-│          Storage Adapters                │
-│   SQLite  │  Supabase  │  PostgreSQL     │
-└──────────────────────────────────────────┘
+┌─────────────────────────────────────────────┐
+│           Claude Code (claude CLI)          │
+│               ↕ MCP protocol                │
+├─────────────────────────────────────────────┤
+│     ACP MCP Server (@rbrtdds/acp-mcp)       │
+│  acp_context │ acp_recall │ acp_remember    │
+│  acp_status  │ acp_facts                    │
+├─────────────────────────────────────────────┤
+│     ACP Core (@rbrtdds/acp-core)            │
+│  Fact Extractor │ Recall Engine (hybrid)    │
+│  Compaction     │ Chunk Store (RAG)         │
+├──────────────────────┬──────────────────────┤
+│   SQLite WASM        │   SQLite Native      │
+│   (sql.js)           │   (better-sqlite3)   │
+└──────────────────────┴──────────────────────┘
+         ↑ optional
+┌─────────────────────────────────────────────┐
+│     ACP Embeddings (@rbrtdds/acp-embeddings)│
+│     transformers.js │ all-MiniLM-L6-v2      │
+└─────────────────────────────────────────────┘
 ```
 
 ## Packages
 
-| Package | Description |
-|---------|-------------|
-| `@rbrtdds/acp-core` | Core library — models, adapters, engines |
-| `@rbrtdds/acp-cli` | CLI tool — `acp init`, `acp recall`, etc. |
-| `@rbrtdds/acp-mcp` | MCP server — native Claude Code integration |
-| `@rbrtdds/acp-embeddings` | Optional local embedding provider (transformers.js) |
+Monorepo with 4 packages, all published under `@rbrtdds/` on npm:
+
+| Package | Version | Description |
+|---------|---------|-------------|
+| [`@rbrtdds/acp-core`](packages/core) | 0.1.3 | Core library — storage adapters (SQLite WASM/Native), fact extraction, recall engine, compaction, Claude Code session reader |
+| [`@rbrtdds/acp-cli`](packages/cli) | 0.1.3 | CLI tool (`acp`) — init, recall, facts, import, export, compact, setup |
+| [`@rbrtdds/acp-mcp`](packages/mcp) | 0.1.3 | MCP server (`acp-mcp`) — exposes ACP tools to Claude Code via MCP protocol |
+| [`@rbrtdds/acp-embeddings`](packages/embeddings) | 0.1.3 | Local embedding provider — transformers.js with `all-MiniLM-L6-v2` (~23MB, offline) |
+
+**User-facing installs:** `@rbrtdds/acp-cli` (provides `acp` binary) and `@rbrtdds/acp-mcp` (provides `acp-mcp` binary). The other packages are internal dependencies.
 
 ## Development
 
@@ -228,15 +221,19 @@ Scopes: `core`, `cli`, `mcp`, `deps`, `release`, `repo`
 
 ## Roadmap
 
-- [x] Local SQLite storage
-- [x] Heuristic fact extraction (regex-based)
+- [x] Local SQLite storage (WASM + Native adapters)
+- [x] Heuristic fact extraction (regex-based, session summaries)
 - [x] Keyword-based recall
+- [x] Semantic embedding search (transformers.js, all-MiniLM-L6-v2)
+- [x] Hybrid recall (keyword + semantic)
+- [x] RAG chunk store with conversation chunking
 - [x] Memory tiering & compaction
 - [x] Claude Code session import
-- [x] MCP server integration
-- [x] CLI with all commands
-- [x] Conventional commits + semantic versioning
-- [x] Semantic embedding search (transformers.js, Xenova/all-MiniLM-L6-v2)
+- [x] MCP server integration (5 tools)
+- [x] CLI with all commands (11 commands)
+- [x] One-step setup (`acp init` handles config + MCP + CLAUDE.md)
+- [x] Cross-session fact deduplication (MD5 + Jaccard)
+- [x] Conventional commits + semantic versioning (changesets)
 - [ ] Cloud storage (Supabase adapter)
 - [ ] Self-hosted PostgreSQL + pgvector
 - [ ] Codex / Gemini CLI adapters

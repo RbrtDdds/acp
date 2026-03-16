@@ -5,7 +5,7 @@ CLI tool for [ACP (AI Context Protocol)](https://github.com/robodudas/acp) — m
 ## Install
 
 ```bash
-npm i -g @rbrtdds/acp-cli
+npm i -g @rbrtdds/acp-cli @rbrtdds/acp-mcp
 ```
 
 Requires Node.js >= 18.
@@ -13,23 +13,27 @@ Requires Node.js >= 18.
 ## Setup
 
 ```bash
-# Initialize ACP (creates ~/.acp/ with SQLite database)
 acp init
-
-# Add ACP instructions to ~/.claude/CLAUDE.md
-acp setup global
-
-# Or add to current project only
-acp setup project
 ```
+
+`acp init` handles the full setup in one step:
+- Prompts for SQLite engine and embedding preferences
+- Saves config to `~/.acp/config.json`
+- Registers the MCP server with Claude Code
+- Adds ACP instructions to `~/.claude/CLAUDE.md`
+- Database is created automatically on first use
 
 ## Commands
 
 ### `acp init`
 
-Interactive initialization. Prompts for:
+Full interactive setup. Prompts for:
 - **SQLite engine:** `sqlite-wasm` (zero native deps) or `sqlite-native` (faster, uses better-sqlite3)
 - **Embeddings:** local model (~23MB, offline) or disabled (keyword-only search)
+
+Then automatically:
+- Registers MCP server via `claude mcp add` (with fallback instructions if `claude` CLI is not available)
+- Injects ACP instructions into `~/.claude/CLAUDE.md` (updates existing block or prepends)
 
 ### `acp import claude-code`
 

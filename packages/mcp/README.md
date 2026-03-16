@@ -2,36 +2,22 @@
 
 MCP server for [ACP (AI Context Protocol)](https://github.com/robodudas/acp) — gives Claude Code persistent memory across sessions.
 
-## Install
+## Install & Setup
 
 ```bash
-npm i -g @rbrtdds/acp-mcp
-```
-
-Requires Node.js >= 18 and [ACP initialized](#prerequisites).
-
-## Prerequisites
-
-ACP must be initialized before the MCP server can run:
-
-```bash
-npm i -g @rbrtdds/acp-cli
+npm i -g @rbrtdds/acp-cli @rbrtdds/acp-mcp
 acp init
 ```
 
-## Connect to Claude Code
+Requires Node.js >= 18.
+
+`acp init` handles everything — config, MCP registration with Claude Code, and CLAUDE.md setup. No manual steps needed.
+
+If you need to register the MCP server manually (e.g. `claude` CLI not in PATH during init):
 
 ```bash
 claude mcp add --transport stdio --scope user acp -- acp-mcp
 ```
-
-Then tell Claude to use ACP automatically:
-
-```bash
-acp setup global
-```
-
-This adds instructions to `~/.claude/CLAUDE.md` so Claude calls `acp_context` at the start of every session.
 
 ## Tools
 
